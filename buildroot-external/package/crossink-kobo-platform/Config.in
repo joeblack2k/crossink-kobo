@@ -1,0 +1,7 @@
+config BR2_PACKAGE_CROSSINK_KOBO_PLATFORM
+	bool "CrossInk Kobo Linux platform"
+	depends on BR2_TOOLCHAIN_GCC_AT_LEAST_10
+	select BR2_PACKAGE_CROSSINK_FBINK
+	select BR2_PACKAGE_LIBDRM
+	help
+	  Build the isolated Kobo/Linux display HAL and hardware smoke tools.

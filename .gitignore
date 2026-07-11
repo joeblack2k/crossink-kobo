@@ -36,3 +36,10 @@ lib/EpdFont/scripts/output/
 /site/public/CNAME
 
 dist-publish/
+
+# Reproducible external kernel/rootfs source checkouts; pins live in sources.lock.
+/vendor/
+/output-kobo/
+/local-secrets/
+/artifacts/kobo/**/*.img
+/artifacts/kobo/release/image-work/

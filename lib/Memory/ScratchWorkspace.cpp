@@ -30,7 +30,13 @@ bool ensureMutex() {
 
   mutex = nullptr;
   if (!gMutex.compare_exchange_strong(mutex, created, std::memory_order_release, std::memory_order_acquire)) {
+#ifdef SIMULATOR
+    // The pinned POSIX FreeRTOS shim owns its mutex with plain new/delete and
+    // does not expose vSemaphoreDelete().
+    delete created;
+#else
     vSemaphoreDelete(created);
+#endif
   }
   return true;
 }

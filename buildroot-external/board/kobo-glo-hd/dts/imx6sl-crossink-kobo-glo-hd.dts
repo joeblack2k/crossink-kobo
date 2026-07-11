@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Kobo Glo HD N437 / Netronix E60Q9X device tree.
+ *
+ * E60Q90 and the upstream-supported Tolino E60QF0 share the i.MX6SL
+ * platform and wiring.  The original N437 board source identifies PCB 46
+ * (E60Q9X) and confirms the inherited EPDC, TPS65185, zForce, frontlight,
+ * RC5T619, power/cover key, storage and Wi-Fi GPIO assignments.  The two
+ * Tolino-only physical frontlight/home keys are deliberately removed.
+ */
+
+/dts-v1/;
+
+#include "nxp/imx/imx6sl-tolino-shine2hd.dts"
+
+/ {
+	model = "Kobo Glo HD N437 (CrossInk)";
+	compatible = "kobo,glo-hd-n437", "fsl,imx6sl";
+};
+
+&epdc {
+	status = "okay";
+};
+
+&zforce {
+	status = "okay";
+};
+
+&gpio_keys {
+	status = "okay";
+	/delete-node/ key-fl;
+	/delete-node/ key-home;
+};
+
+&leds {
+	status = "okay";
+};
+
+&usdhc3 {
+	status = "okay";
+};
+
+&{/backlight} {
+	status = "okay";
+};

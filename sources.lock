@@ -1,0 +1,48 @@
+# External source pins for the Kobo Glo HD N437 port.
+# Refresh only through an explicit dependency-upgrade change.
+
+crossink:
+  repository: https://github.com/uxjulia/CrossInk.git
+  commit: b7f6708f96d05e5851f8bcfaaf57bc0e91dc0567
+
+crosspoint_simulator_compat:
+  repository: https://github.com/uxjulia/crosspoint-simulator.git
+  commit: efe37c6779e1f977cb361240f56ba4028d1c13f6
+
+arduinojson:
+  repository: https://github.com/bblanchon/ArduinoJson.git
+  version: 7.4.2
+  commit: 733bc4ee82630c88c0a619a883cd3a206efae977
+
+qrcode:
+  repository: https://github.com/ricmoo/QRCode.git
+  version: 0.0.1
+  commit: 5ba5d5bf2790f4a885b0db823cf218e4fa718061
+
+pngdec:
+  repository: https://github.com/bitbank2/PNGdec.git
+  version: 1.1.6
+  commit: 9a9c585fd39d148c5517597b02ce490e0fdb1bb4
+
+jpegdec:
+  repository: https://github.com/bitbank2/JPEGDEC.git
+  commit: 86282979224c8a32fd51e091ed5a35b0c699a52b
+
+kobo_kernel:
+  repository: https://github.com/akemnade/linux.git
+  branch: kobo/drm-merged-6.19
+  commit: ccddaba42e0abafbce84cc2243cbe0c98d400944
+
+buildroot:
+  repository: https://github.com/buildroot/buildroot.git
+  commit: 92abb11ee4f574981eb194d283b97afad5dec004
+
+fbink:
+  repository: https://github.com/NiLuJe/FBInk.git
+  commit: 83110d3d278cf9cd44cc1d16237e284a89f72633
+  submodules:
+    font8x8: fa74831b9076805271cdedc0ee12137aa548e524
+    i2c-tools: ec1267371e378fc6aaf1cd7686b5b9b31293255a
+    libevdev: 96c70d46f040bed4d58153ef94f6ea3382b197c4
+    libunibreak: 3ce4bfa3129ff3738046a44a6db533d2ce25af2b
+    stb: dfa32facac4a16184dd66f8e482bf15a678f2bf3

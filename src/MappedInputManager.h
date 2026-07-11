@@ -21,6 +21,7 @@ class MappedInputManager {
   // Enable/disable reader-specific front button mapping.
   // Call with true in reader activity onEnter(), false in onExit().
   void setReaderMode(bool enabled) { readerMode = enabled; }
+  [[nodiscard]] bool isReaderMode() const { return readerMode; }
   void setPowerAsConfirmInReaderMode(bool enabled) { powerAsConfirmInReaderMode = enabled; }
 
   void update() const { gpio.update(); }
@@ -41,10 +42,17 @@ class MappedInputManager {
   int getReleasedFrontButton() const;
   bool isFrontButtonPressed(uint8_t buttonIndex) const;
 
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  // Platform touch/keyboard adapters inject logical actions here; activities
+  // remain independent of evdev, SDL and raw hardware button numbers.
+  void injectPress(Button button);
+  void injectRelease(Button button);
+  void clearInjectedInputFrame();
+#endif
 #ifdef SIMULATOR
-  void simulatorInjectPress(Button button);
-  void simulatorInjectRelease(Button button);
-  void simulatorClearInputFrame();
+  void simulatorInjectPress(Button button) { injectPress(button); }
+  void simulatorInjectRelease(Button button) { injectRelease(button); }
+  void simulatorClearInputFrame() { clearInjectedInputFrame(); }
 #endif
 
  private:
@@ -55,11 +63,11 @@ class MappedInputManager {
   mutable bool suppressConfirmRelease = false;
   mutable bool suppressPowerRelease = false;
   mutable bool suppressPowerConfirmRelease = false;
-#ifdef SIMULATOR
-  std::array<bool, BUTTON_COUNT> simulatorPressed{};
-  std::array<bool, BUTTON_COUNT> simulatorReleased{};
-  std::array<bool, BUTTON_COUNT> simulatorHeld{};
-  std::array<unsigned long, BUTTON_COUNT> simulatorPressStart{};
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  std::array<bool, BUTTON_COUNT> injectedPressed{};
+  std::array<bool, BUTTON_COUNT> injectedReleased{};
+  std::array<bool, BUTTON_COUNT> injectedHeld{};
+  std::array<unsigned long, BUTTON_COUNT> injectedPressStart{};
 #endif
 
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;

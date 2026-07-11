@@ -384,6 +384,10 @@ class CrossPointSettings {
   uint8_t sleepTimeoutMinutes = 10;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
+#ifdef KOBO_LINUX
+  // White-only Kobo Glo HD frontlight percentage.
+  uint8_t frontlightBrightness = 20;
+#endif
   uint8_t hyphenationEnabled = 0;
 
   // Reader screen margin settings

@@ -395,6 +395,9 @@ void TxtReaderActivity::initializeReader() {
   cachedOrientedMarginBottom += std::max(
       cachedScreenMargin,
       static_cast<uint8_t>(UITheme::getInstance().getStatusBarHeight() + ReaderUtils::STATUS_BAR_TEXT_PADDING));
+#ifdef KOBO_LINUX
+  cachedOrientedMarginBottom += 96;
+#endif
 
   viewportWidth = renderer.getScreenWidth() - cachedOrientedMarginLeft - cachedOrientedMarginRight;
   const int viewportHeight = renderer.getScreenHeight() - cachedOrientedMarginTop - cachedOrientedMarginBottom;
@@ -589,6 +592,9 @@ void TxtReaderActivity::renderPage() {
   renderStatusBar();
   GUI.drawTopStatusBarClock(renderer, UITheme::getInstance().getMetrics().topPadding, nullptr, true, 0,
                             ReaderUtils::readerDarkModeEnabled());
+#ifdef KOBO_LINUX
+  GUI.drawButtonHints(renderer, tr(STR_PREV_PAGE), tr(STR_NEXT_PAGE), "", "", true);
+#endif
 
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
@@ -813,6 +819,9 @@ bool TxtReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
   }
   marginBottom += std::max(screenMargin, static_cast<uint8_t>(UITheme::getInstance().getStatusBarHeight() +
                                                               ReaderUtils::STATUS_BAR_TEXT_PADDING));
+#ifdef KOBO_LINUX
+  marginBottom += 96;
+#endif
 
   const int vw = renderer.getScreenWidth() - marginLeft - marginRight;
   const int vh = renderer.getScreenHeight() - marginTop - marginBottom;

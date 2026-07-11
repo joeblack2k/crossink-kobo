@@ -1,0 +1,23 @@
+#!/bin/sh
+# Minimal CrossInk-owned recovery. Networking/Dropbear remain managed by init.
+set -u
+
+reason=${1:-unknown}
+state_dir=/data/.crossink/recovery
+mkdir -p "$state_dir"
+{
+	printf 'reason=%s\n' "$reason"
+	printf 'timestamp_utc='; date -u +%Y-%m-%dT%H:%M:%SZ
+	printf 'kernel='; uname -r
+} > "$state_dir/active"
+logger -t crossink-recovery "entered recovery: $reason"
+
+# Once EPDC is enabled this gives an unmistakable own recovery screen. A
+# missing/disabled framebuffer is expected during safe SSH-only bring-up.
+if [ -x /usr/bin/crossink-kobo-display-smoke ]; then
+	transform=identity
+	if [ -r /etc/crossink/display-transform ]; then transform=$(sed -n '1p' /etc/crossink/display-transform); fi
+	/usr/bin/crossink-kobo-display-smoke "$transform" >/dev/null 2>&1 || true
+fi
+
+while :; do sleep 3600; done

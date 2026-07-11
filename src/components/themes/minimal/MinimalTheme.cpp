@@ -593,6 +593,10 @@ void MinimalTheme::setHomeButtonHintSelection(const int selectedIndex) { homeBut
 
 void MinimalTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                    const char* btn4, const bool allowInvertedText) const {
+#ifdef KOBO_LINUX
+  drawKoboTouchFrame(renderer, btn1, btn2, btn3, btn4, allowInvertedText);
+  return;
+#endif
   const GfxRenderer::Orientation origOrientation = renderer.getOrientation();
   const bool invertText = allowInvertedText && origOrientation == GfxRenderer::Orientation::PortraitInverted;
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);

@@ -1,5 +1,7 @@
 #include "MappedInputManager.h"
 
+#include <Arduino.h>
+
 #include <algorithm>
 #include <utility>
 
@@ -110,7 +112,7 @@ bool readMappedSideButtons(const HalGPIO& gpio, bool (HalGPIO::*fn)(uint8_t) con
   return (primary != kNoButton && (gpio.*fn)(primary)) || (secondary != kNoButton && (gpio.*fn)(secondary));
 }
 
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
 size_t buttonIndex(MappedInputManager::Button button) { return static_cast<size_t>(button); }
 #endif
 
@@ -167,8 +169,8 @@ bool MappedInputManager::shouldMirrorPowerAsConfirmHold() const {
 }
 
 bool MappedInputManager::wasPressed(const Button button) const {
-#ifdef SIMULATOR
-  if (simulatorPressed[buttonIndex(button)]) {
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  if (injectedPressed[buttonIndex(button)]) {
     return true;
   }
 #endif
@@ -188,8 +190,8 @@ bool MappedInputManager::wasPressed(const Button button) const {
 }
 
 bool MappedInputManager::wasReleased(const Button button) const {
-#ifdef SIMULATOR
-  if (simulatorReleased[buttonIndex(button)]) {
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  if (injectedReleased[buttonIndex(button)]) {
     return true;
   }
 #endif
@@ -254,8 +256,8 @@ bool MappedInputManager::wasReleased(const Button button) const {
 }
 
 bool MappedInputManager::isPressed(const Button button) const {
-#ifdef SIMULATOR
-  if (simulatorHeld[buttonIndex(button)]) {
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  if (injectedHeld[buttonIndex(button)]) {
     return true;
   }
 #endif
@@ -278,8 +280,8 @@ bool MappedInputManager::isPressed(const Button button) const {
 }
 
 bool MappedInputManager::wasAnyPressed() const {
-#ifdef SIMULATOR
-  if (std::any_of(simulatorPressed.begin(), simulatorPressed.end(), [](bool pressed) { return pressed; })) {
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  if (std::any_of(injectedPressed.begin(), injectedPressed.end(), [](bool pressed) { return pressed; })) {
     return true;
   }
 #endif
@@ -287,8 +289,8 @@ bool MappedInputManager::wasAnyPressed() const {
 }
 
 bool MappedInputManager::wasAnyReleased() const {
-#ifdef SIMULATOR
-  if (std::any_of(simulatorReleased.begin(), simulatorReleased.end(), [](bool released) { return released; })) {
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  if (std::any_of(injectedReleased.begin(), injectedReleased.end(), [](bool released) { return released; })) {
     return true;
   }
 #endif
@@ -297,11 +299,11 @@ bool MappedInputManager::wasAnyReleased() const {
 
 unsigned long MappedInputManager::getHeldTime() const {
   unsigned long heldTime = gpio.getHeldTime();
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
   const unsigned long now = millis();
   for (size_t i = 0; i < BUTTON_COUNT; i++) {
-    if (simulatorHeld[i] && simulatorPressStart[i] > 0) {
-      heldTime = std::max(heldTime, now - simulatorPressStart[i]);
+    if (injectedHeld[i] && injectedPressStart[i] > 0) {
+      heldTime = std::max(heldTime, now - injectedPressStart[i]);
     }
   }
 #endif
@@ -371,24 +373,24 @@ int MappedInputManager::getReleasedFrontButton() const {
 
 bool MappedInputManager::isFrontButtonPressed(const uint8_t buttonIndex) const { return gpio.isPressed(buttonIndex); }
 
-#ifdef SIMULATOR
-void MappedInputManager::simulatorInjectPress(Button button) {
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+void MappedInputManager::injectPress(Button button) {
   const size_t idx = buttonIndex(button);
-  simulatorPressed[idx] = true;
-  simulatorReleased[idx] = false;
-  simulatorHeld[idx] = true;
-  simulatorPressStart[idx] = millis();
+  injectedPressed[idx] = true;
+  injectedReleased[idx] = false;
+  injectedHeld[idx] = true;
+  injectedPressStart[idx] = millis();
 }
 
-void MappedInputManager::simulatorInjectRelease(Button button) {
+void MappedInputManager::injectRelease(Button button) {
   const size_t idx = buttonIndex(button);
-  simulatorPressed[idx] = false;
-  simulatorReleased[idx] = true;
-  simulatorHeld[idx] = false;
+  injectedPressed[idx] = false;
+  injectedReleased[idx] = true;
+  injectedHeld[idx] = false;
 }
 
-void MappedInputManager::simulatorClearInputFrame() {
-  simulatorPressed.fill(false);
-  simulatorReleased.fill(false);
+void MappedInputManager::clearInjectedInputFrame() {
+  injectedPressed.fill(false);
+  injectedReleased.fill(false);
 }
 #endif

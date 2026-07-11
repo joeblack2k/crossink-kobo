@@ -1,0 +1,34 @@
+#!/bin/sh
+# Mount the CrossInk-owned user partition before SSH and the GUI start.
+# A failed mount must not prevent recovery via USB Ethernet.
+
+DATA=/data
+DEVICE=/dev/mmcblk0p4
+BOOT=/boot
+BOOT_DEVICE=/dev/mmcblk0p1
+
+case "${1:-}" in
+	start)
+		mkdir -p "$BOOT"
+		if ! mountpoint -q "$BOOT"; then
+			mount -t ext4 -o rw,noatime "$BOOT_DEVICE" "$BOOT" 2>/dev/null || \
+				echo "crossink: boot flag partition unavailable ($BOOT_DEVICE)" >&2
+		fi
+		mkdir -p "$DATA"
+		if ! mountpoint -q "$DATA"; then
+			mount -t ext4 -o rw,noatime "$DEVICE" "$DATA" 2>/dev/null || \
+				echo "crossink: user partition unavailable ($DEVICE)" >&2
+		fi
+		if mountpoint -q "$DATA"; then
+			mkdir -p "$DATA/Books" "$DATA/.crossink/crash" "$DATA/.crossink/log"
+		fi
+		;;
+	stop)
+		mountpoint -q "$DATA" && umount "$DATA" || true
+		mountpoint -q "$BOOT" && umount "$BOOT" || true
+		;;
+	*)
+		echo "Usage: $0 {start|stop}" >&2
+		exit 1
+		;;
+esac

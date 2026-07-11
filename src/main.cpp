@@ -221,16 +221,29 @@ EpdFont bitter20BoldItalicFont(&bitter_20_bolditalic);
 EpdFontFamily bitter20FontFamily(&bitter20RegularFont, &bitter20BoldFont, &bitter20ItalicFont, &bitter20BoldItalicFont);
 #endif
 
+#ifdef KOBO_LINUX
+// Preserve the X4 UI's physical text size on the 300-ppi N437 panel. The
+// existing 8/10/12-pixel Inter faces are unreadably small at this density;
+// the pinned 12/14/16-pixel Lexend faces provide native-resolution glyphs
+// without scaling the framebuffer.
+EpdFont smallFont(&lexenddeca_12_regular);
+EpdFontFamily smallFontFamily(&smallFont);
+EpdFont ui10RegularFont(&lexenddeca_14_regular);
+EpdFont ui10BoldFont(&lexenddeca_14_bold);
+EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
+EpdFont ui12RegularFont(&lexenddeca_16_regular);
+EpdFont ui12BoldFont(&lexenddeca_16_bold);
+EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+#else
 EpdFont smallFont(&inter_8_regular);
 EpdFontFamily smallFontFamily(&smallFont);
-
 EpdFont ui10RegularFont(&inter_10_regular);
 EpdFont ui10BoldFont(&inter_10_bold);
 EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
-
 EpdFont ui12RegularFont(&inter_12_regular);
 EpdFont ui12BoldFont(&inter_12_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+#endif
 
 // measurement of power button press duration calibration value
 unsigned long t1 = 0;
@@ -698,8 +711,10 @@ void setup() {
   // Web Serial sends file data in 256-byte chunks and waits for a 1-byte ACK.
   // HWCDC defaults to a 256-byte RX queue, which is fine for logs but too small
   // for chunked file transfer.
+#ifndef SIMULATOR
   logSerial.setRxBufferSize(1024);
   logSerial.setTxBufferSize(1024);
+#endif
   Serial.begin(115200);
 #ifndef SIMULATOR
   logSerial.setTxTimeoutMs(1);  // This is a load-bearing 1. Do not modify.
@@ -740,7 +755,12 @@ void setup() {
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
+#ifndef SIMULATOR
+  // FAT needs an application-provided timestamp callback. POSIX filesystems
+  // already timestamp writes in the kernel and the simulator/Kobo storage
+  // HAL intentionally does not expose this SdFat-only hook.
   Storage.installDateTimeCallback(&SETTINGS.clockUtcOffsetQ);
+#endif
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));

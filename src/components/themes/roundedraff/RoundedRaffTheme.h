@@ -29,7 +29,11 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeRecentBooksCount = 1,
                                  .homeContinueReadingInMenu = true,
                                  .homeMenuTopOffset = 20,
+#ifdef KOBO_LINUX
+                                 .buttonHintsHeight = 96,
+#else
                                  .buttonHintsHeight = 40,
+#endif
                                  .sideButtonHintsWidth = 30,
                                  .progressBarHeight = 16,
                                  .progressBarMarginTop = 1,

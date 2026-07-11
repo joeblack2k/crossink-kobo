@@ -1,0 +1,75 @@
+#include "HalGPIO.h"
+
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <cstdio>
+
+HalGPIO gpio;
+
+void HalGPIO::begin() {
+  crossink::kobo::KeyDeviceInfo powerDevice;
+  if (crossink::kobo::KoboEvdevKey::discoverPowerKey(powerDevice) && !powerKey_.open(powerDevice)) {
+    std::fprintf(stderr, "[KOBO] failed to open power input %s\n", powerDevice.path.c_str());
+  }
+  if (!battery_.discover()) {
+    std::fprintf(stderr, "[KOBO] no battery power_supply found\n");
+  }
+  crossink::kobo::BatterySnapshot snapshot;
+  if (battery_.read(snapshot)) usbConnected_ = snapshot.usbOnline;
+}
+
+void HalGPIO::beginFrame() {
+  powerKey_.beginFrame();
+  usbChanged_ = false;
+}
+
+void HalGPIO::update() {
+  powerKey_.update();
+  crossink::kobo::BatterySnapshot snapshot;
+  if (battery_.read(snapshot) && snapshot.usbOnline != usbConnected_) {
+    usbConnected_ = snapshot.usbOnline;
+    usbChanged_ = true;
+  }
+}
+
+bool HalGPIO::isPressed(const std::uint8_t buttonIndex) const {
+  return buttonIndex == BTN_POWER && powerKey_.isPressed();
+}
+
+bool HalGPIO::wasPressed(const std::uint8_t buttonIndex) const {
+  return buttonIndex == BTN_POWER && powerKey_.wasPressed();
+}
+
+bool HalGPIO::wasAnyPressed() const { return powerKey_.wasPressed(); }
+
+bool HalGPIO::wasReleased(const std::uint8_t buttonIndex) const {
+  return buttonIndex == BTN_POWER && powerKey_.wasReleased();
+}
+
+bool HalGPIO::wasAnyReleased() const { return powerKey_.wasReleased(); }
+
+unsigned long HalGPIO::getHeldTime() const { return powerKey_.heldMilliseconds(); }
+
+unsigned long HalGPIO::getPowerButtonHeldTime() const { return powerKey_.heldMilliseconds(); }
+
+void HalGPIO::startDeepSleep() {
+  crossink::kobo::KoboFrontlightSysfs frontlight;
+  const bool haveFrontlight = frontlight.discover();
+  const int savedBrightness = haveFrontlight ? frontlight.percentage() : -1;
+  if (haveFrontlight) (void)frontlight.setPercentage(0);
+  const int fd = ::open("/sys/power/state", O_WRONLY | O_CLOEXEC);
+  if (fd < 0) {
+    std::fprintf(stderr, "[KOBO] cannot open /sys/power/state\n");
+    if (savedBrightness >= 0) (void)frontlight.setPercentage(savedBrightness);
+    return;
+  }
+  constexpr char state[] = "mem\n";
+  if (::write(fd, state, sizeof(state) - 1) != static_cast<ssize_t>(sizeof(state) - 1)) {
+    std::fprintf(stderr, "[KOBO] suspend request failed\n");
+  }
+  ::close(fd);
+  if (savedBrightness >= 0) (void)frontlight.setPercentage(savedBrightness);
+}
+
+void HalGPIO::verifyPowerButtonWakeup(std::uint16_t /*requiredDurationMs*/, bool /*shortPressAllowed*/) {}

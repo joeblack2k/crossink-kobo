@@ -1,3 +1,15 @@
+## [Kobo Glo HD Beta 1] - Unreleased
+
+### Added
+
+- Added a dedicated Linux hardware layer and reproducible minimal Buildroot image for the Kobo Glo HD N437, using the modern Kobo DRM kernel, USB Ethernet, key-only SSH, e-ink refresh control, touch, frontlight, battery monitoring, suspend and an independent recovery mode.
+- Added a native 1072×1448 Kobo interface with direct reader touch zones and a permanent two-button touch frame that changes actions with the current screen.
+- Added Kobo image construction, verification, hardware probing, deployment, rollback and release-evidence tooling while preserving the original CrossInk simulator and Xteink targets.
+
+### Changed
+
+- EPUB and TXT readers reserve the Kobo touch frame and use native high-density fonts and layout metrics when built for Kobo Linux.
+
 ## [v1.4.0] - 2026-07-10
 
 ### Added

@@ -160,7 +160,11 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeRecentBooksCount = 1,
                                  .homeContinueReadingInMenu = false,
                                  .homeMenuTopOffset = 10,
+#ifdef KOBO_LINUX
+                                 .buttonHintsHeight = 96,
+#else
                                  .buttonHintsHeight = 40,
+#endif
                                  .sideButtonHintsWidth = 30,
                                  .progressBarHeight = 16,
                                  .progressBarMarginTop = 1,
@@ -228,6 +232,10 @@ class BaseTheme {
                                bool foregroundBlack = true) const;
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4, bool allowInvertedText = false) const;
+#ifdef KOBO_LINUX
+  void drawKoboTouchFrame(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
+                          const char* btn4, bool allowInvertedText) const;
+#endif
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
   virtual void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                         const std::function<std::string(int index)>& rowTitle,

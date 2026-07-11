@@ -1,0 +1,7 @@
+config BR2_PACKAGE_CROSSINK_FBINK
+	bool "CrossInk FBInk backend"
+	depends on BR2_USE_MMU
+	help
+	  Build the pinned GPLv3+ FBInk static backend for the Kobo i.MX EPDC.
+	  CrossInk-Kobo uses it for framebuffer discovery and safe full/partial
+	  refreshes; source and licensing are bundled with every release.

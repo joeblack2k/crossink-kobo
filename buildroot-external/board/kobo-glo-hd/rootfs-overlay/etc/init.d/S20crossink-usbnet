@@ -1,0 +1,53 @@
+#!/bin/sh
+
+GADGET=/sys/kernel/config/usb_gadget/crossink
+DEVICE_IP=192.168.7.2
+
+start() {
+	modprobe libcomposite 2>/dev/null || true
+	mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
+
+	mkdir -p "$GADGET"
+	printf '0x1d6b' > "$GADGET/idVendor"
+	printf '0x0104' > "$GADGET/idProduct"
+	mkdir -p "$GADGET/strings/0x409"
+	printf 'CrossInk-N437' > "$GADGET/strings/0x409/product"
+	printf 'CrossInk' > "$GADGET/strings/0x409/manufacturer"
+	printf 'n437-dev' > "$GADGET/strings/0x409/serialnumber"
+	mkdir -p "$GADGET/configs/c.1/strings/0x409"
+	printf 'USB Ethernet and SSH' > "$GADGET/configs/c.1/strings/0x409/configuration"
+	mkdir -p "$GADGET/functions/ecm.usb0"
+	printf '02:43:70:00:00:02' > "$GADGET/functions/ecm.usb0/dev_addr"
+	printf '02:43:70:00:00:01' > "$GADGET/functions/ecm.usb0/host_addr"
+	ln -snf "$GADGET/functions/ecm.usb0" "$GADGET/configs/c.1/ecm.usb0"
+
+	udc=''
+	for candidate in /sys/class/udc/*; do
+		[ -e "$candidate" ] || continue
+		udc=${candidate##*/}
+		break
+	done
+	[ -n "$udc" ] || return 1
+	printf '%s' "$udc" > "$GADGET/UDC"
+
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ -e /sys/class/net/usb0 ] && break
+		sleep 1
+	done
+	[ -e /sys/class/net/usb0 ] || return 1
+	ip link set usb0 up
+	ip addr replace "$DEVICE_IP/24" dev usb0
+	start-stop-daemon -S -b -m -p /run/udhcpd-usb.pid --exec /usr/sbin/udhcpd -- -f /etc/udhcpd-usb.conf
+}
+
+stop() {
+	start-stop-daemon -K -p /run/udhcpd-usb.pid 2>/dev/null || true
+	[ -e "$GADGET/UDC" ] && printf '' > "$GADGET/UDC"
+}
+
+case "${1:-}" in
+	start) start ;;
+	stop) stop ;;
+	restart) stop; start ;;
+	*) echo "Usage: $0 {start|stop|restart}" >&2; exit 1 ;;
+esac

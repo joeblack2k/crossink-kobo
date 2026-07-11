@@ -150,6 +150,10 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4, const bool allowInvertedText) const {
+#ifdef KOBO_LINUX
+  drawKoboTouchFrame(renderer, btn1, btn2, btn3, btn4, allowInvertedText);
+  return;
+#endif
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   const bool invertText = allowInvertedText && orig_orientation == GfxRenderer::Orientation::PortraitInverted;
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
@@ -188,6 +192,38 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 
   renderer.setOrientation(orig_orientation);
 }
+
+#ifdef KOBO_LINUX
+void BaseTheme::drawKoboTouchFrame(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
+                                   const char* btn4, const bool allowInvertedText) const {
+  const GfxRenderer::Orientation original = renderer.getOrientation();
+  const bool inverted = allowInvertedText && original == GfxRenderer::Orientation::PortraitInverted;
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  const int width = renderer.getScreenWidth();
+  const int height = renderer.getScreenHeight();
+  constexpr int frameHeight = 96;
+  const int top = height - frameHeight;
+  const int half = width / 2;
+  const char* left = btn1 != nullptr && btn1[0] != '\0' ? btn1 : btn3;
+  const char* right = btn2 != nullptr && btn2[0] != '\0' ? btn2 : btn4;
+
+  renderer.fillRect(0, top, width, frameHeight, false);
+  renderer.drawRect(0, top, half, frameHeight, 2, true);
+  renderer.drawRect(half, top, width - half, frameHeight, 2, true);
+  renderer.setOrientation(inverted ? GfxRenderer::Orientation::PortraitInverted : GfxRenderer::Orientation::Portrait);
+  const int textY = inverted ? (frameHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2
+                             : top + (frameHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
+  if (left != nullptr && left[0] != '\0') {
+    const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, left);
+    renderer.drawText(UI_12_FONT_ID, (half - textWidth) / 2, textY, left);
+  }
+  if (right != nullptr && right[0] != '\0') {
+    const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, right);
+    renderer.drawText(UI_12_FONT_ID, half + (width - half - textWidth) / 2, textY, right);
+  }
+  renderer.setOrientation(original);
+}
+#endif
 
 void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
   const int screenWidth = renderer.getScreenWidth();

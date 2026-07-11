@@ -748,6 +748,9 @@ ReaderViewportLayout computeReaderViewportLayout(GfxRenderer& renderer, const bo
     layout.marginBottom +=
         std::max(SETTINGS.screenMargin, static_cast<uint8_t>(statusBarHeight + ReaderUtils::STATUS_BAR_TEXT_PADDING));
   }
+#ifdef KOBO_LINUX
+  layout.marginBottom += 96;
+#endif
 
   layout.viewportWidth = renderer.getScreenWidth() - layout.marginLeft - layout.marginRight;
   layout.viewportHeight = renderer.getScreenHeight() - layout.marginTop - layout.marginBottom;
@@ -4287,6 +4290,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
 
   composePageBuffer();
   renderStatusBar();
+#ifdef KOBO_LINUX
+  GUI.drawButtonHints(renderer, tr(STR_PREV_PAGE), tr(STR_NEXT_PAGE), "", "", true);
+#endif
   if (pendingBookmarkFeedback) {
     const char* msg = tr(STR_BOOKMARK_ADDED);
     switch (bookmarkFeedbackType) {

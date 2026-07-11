@@ -1,5 +1,9 @@
 #include "ButtonNavigator.h"
 
+#include <algorithm>
+
+#include <Arduino.h>
+
 const MappedInputManager* ButtonNavigator::mappedInput = nullptr;
 
 void ButtonNavigator::onNext(const Callback& callback) {

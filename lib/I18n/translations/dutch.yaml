@@ -2,6 +2,7 @@ _language_name: "Nederlands"
 _language_code: "NL"
 _order: "16"
 
+STR_FRONTLIGHT: "Schermverlichting"
 STR_CROSSINK: "CrossInk"
 STR_BOOTING: "OPSTARTEN"
 STR_SLEEPING: "SLAAPSTAND"
