@@ -1,0 +1,5 @@
+utc_date,backend,waveform,update_mode,iterations,delay_ms,elapsed_ms,result,thermal_before_mC,thermal_peak_observed_mC,notes
+2026-07-11,drm,GC16,full,1,0,293,PASS,,,orientation/frame pattern submitted
+2026-07-11,drm,AUTO,partial,10,500,7985,PASS,,,alternating 400x240 region
+2026-07-11,drm,DU,partial,25,200,12564,PASS,,,alternating 400x240 region
+2026-07-11,drm,DU,partial,100,0,,PASS,46789,51910,elapsed output not retained; process completed and GUI restarted
