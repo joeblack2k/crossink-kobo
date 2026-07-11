@@ -1,0 +1,23 @@
+Regressiebewijs na N437-touchfix
+===============================
+
+Simulator (macOS ARM64): PASS
+- PlatformIO `simulator`: build geslaagd.
+- Geisoleerde simulator-smoketest: PASS.
+- Smoke omvat home, instellingen, EPUB metadata/cache, reader-rendering,
+  reader options/menu en terugkeer naar home.
+
+Linux native platform: PASS
+- Configure/build met warnings-as-errors: geslaagd.
+- `ctest`: 5/5 geslaagd:
+  - touch-transform;
+  - touch-gesture;
+  - evdev-key;
+  - sysfs;
+  - packed-mono.
+
+ARMv7 hard-float musl applicatie: PASS
+- Buildroot package rebuild: geslaagd.
+- ELF: 32-bit LSB PIE, ARM EABI5, interpreter `/lib/ld-musl-armhf.so.1`.
+- SHA-256: 49cc55bb2744423bd5676886e335b895a17fa5da4bde5dbba9dcdf5fe8cb547e
+- Dezelfde hash is atomair naar de fysieke N437 gedeployed.

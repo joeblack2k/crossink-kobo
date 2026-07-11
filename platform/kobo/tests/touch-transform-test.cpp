@@ -41,5 +41,9 @@ int main() {
 
   KoboTouchTransform inverted({{0, 10}, {0, 10}, false, true, true});
   expect(inverted.map(0, 0), {1071, 1447}, "axis inversion");
+
+  KoboTouchTransform nativeLandscape({{0, 1447}, {0, 1071}, true, false, false});
+  expect(nativeLandscape.map(0, 0), {0, 0}, "native landscape minimum");
+  expect(nativeLandscape.map(1447, 1071), {1071, 1447}, "native landscape maximum");
   return EXIT_SUCCESS;
 }

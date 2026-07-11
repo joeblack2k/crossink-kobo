@@ -62,6 +62,9 @@ target_include_directories(crossink_kobo_input
 )
 target_compile_options(crossink_kobo_input PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
+add_executable(crossink-kobo-input-probe tools/input-probe.cpp)
+target_compile_options(crossink-kobo-input-probe PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
 add_library(crossink_kobo_sysfs STATIC sysfs/KoboSysfs.cpp)
 target_include_directories(crossink_kobo_sysfs
 	PUBLIC
@@ -106,7 +109,7 @@ target_compile_options(crossink_kobo_hal_tilt PRIVATE -Wall -Wextra -Wpedantic -
 
 set(KOBO_INSTALL_TARGETS crossink_kobo_hal_clock crossink_kobo_hal_gpio
 	crossink_kobo_hal_power crossink_kobo_input crossink_kobo_sysfs
-	crossink_kobo_hal_tilt)
+	crossink_kobo_hal_tilt crossink-kobo-input-probe)
 if(KOBO_BUILD_DISPLAY)
 	list(APPEND KOBO_INSTALL_TARGETS crossink_kobo_display crossink_kobo_hal_display crossink-kobo-display-smoke)
 endif()
@@ -115,7 +118,7 @@ install(TARGETS ${KOBO_INSTALL_TARGETS}
 	RUNTIME DESTINATION bin
 )
 install(FILES compat/HalClock.h compat/HalDisplay.h compat/HalGPIO.h compat/HalPowerManager.h compat/HalTiltSensor.h
-	display/KoboFbInkDisplay.h display/KoboPackedMono.h input/KoboEvdevKey.h input/KoboEvdevTouch.h
+	display/KoboFbInkDisplay.h display/KoboPackedMono.h input/KoboEvdevAbi.h input/KoboEvdevKey.h input/KoboEvdevTouch.h
 	input/KoboTouchGesture.h input/KoboTouchTransform.h sysfs/KoboSysfs.h
 	DESTINATION include/crossink-kobo
 )

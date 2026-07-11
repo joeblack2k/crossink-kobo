@@ -1,4 +1,5 @@
 #include "KoboEvdevTouch.h"
+#include "KoboEvdevAbi.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -114,11 +115,22 @@ bool KoboEvdevTouch::open(const TouchDeviceInfo& device, TouchCalibration calibr
     return false;
   }
   device_ = device;
+  const bool useDeviceCalibration = calibration.x.maximum <= calibration.x.minimum &&
+                                    calibration.y.maximum <= calibration.y.minimum;
   if (calibration.x.maximum <= calibration.x.minimum) {
     calibration.x = device.x;
   }
   if (calibration.y.maximum <= calibration.y.minimum) {
     calibration.y = device.y;
+  }
+  // N437 zForce coordinates follow the native 1448x1072 panel axes while
+  // CrossInk's user-facing coordinate system is 1072x1448 portrait. Detect
+  // that exact geometry relationship instead of hard-coding an event node.
+  const std::int32_t xSpan = calibration.x.maximum - calibration.x.minimum + 1;
+  const std::int32_t ySpan = calibration.y.maximum - calibration.y.minimum + 1;
+  if (useDeviceCalibration && xSpan == KoboTouchTransform::kPortraitHeight &&
+      ySpan == KoboTouchTransform::kPortraitWidth) {
+    calibration.swapAxes = true;
   }
   transform_ = KoboTouchTransform(calibration);
   rawX_ = calibration.x.minimum;
@@ -144,7 +156,7 @@ bool KoboEvdevTouch::readFrame(TouchFrame& frame) {
     return false;
   }
 
-  input_event event{};
+  KoboEvdevEvent event{};
   while (true) {
     const ssize_t count = ::read(fd_, &event, sizeof(event));
     if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {

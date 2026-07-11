@@ -1,4 +1,5 @@
 #include "KoboEvdevKey.h"
+#include "KoboEvdevAbi.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -81,7 +82,7 @@ void KoboEvdevKey::beginFrame() {
 
 void KoboEvdevKey::update() {
   if (fd_ < 0) return;
-  input_event event{};
+  KoboEvdevEvent event{};
   while (::read(fd_, &event, sizeof(event)) == static_cast<ssize_t>(sizeof(event))) {
     timespec eventNow{};
     clock_gettime(CLOCK_MONOTONIC, &eventNow);

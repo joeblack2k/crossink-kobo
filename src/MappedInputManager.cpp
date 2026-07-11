@@ -312,6 +312,14 @@ unsigned long MappedInputManager::getHeldTime() const {
 
 MappedInputManager::Labels MappedInputManager::mapLabels(const char* back, const char* confirm, const char* previous,
                                                          const char* next) const {
+#ifdef KOBO_LINUX
+  // Kobo has two semantic touch zones, not the Xteink four-button hardware
+  // layout. Activities already pass context-correct Back/Home/Cancel and
+  // Select/Open/Confirm strings in these first two arguments.
+  (void)previous;
+  (void)next;
+  return {back, confirm, "", ""};
+#else
   const bool useReaderMapping = readerMode && SETTINGS.readerFrontButtonsEnabled;
   const ButtonIndex btnBack = useReaderMapping ? SETTINGS.readerFrontButtonBack : SETTINGS.frontButtonBack;
   const ButtonIndex btnConfirm = useReaderMapping ? SETTINGS.readerFrontButtonConfirm : SETTINGS.frontButtonConfirm;
@@ -333,6 +341,7 @@ MappedInputManager::Labels MappedInputManager::mapLabels(const char* back, const
 
   return {labelForHardware(HalGPIO::BTN_BACK), labelForHardware(HalGPIO::BTN_CONFIRM),
           labelForHardware(HalGPIO::BTN_LEFT), labelForHardware(HalGPIO::BTN_RIGHT)};
+#endif
 }
 
 int MappedInputManager::getPressedFrontButton() const {
@@ -384,7 +393,9 @@ void MappedInputManager::injectPress(Button button) {
 
 void MappedInputManager::injectRelease(Button button) {
   const size_t idx = buttonIndex(button);
-  injectedPressed[idx] = false;
+  // Do not clear injectedPressed here. A touchscreen tap can produce press
+  // and release in one application frame; consumers legitimately query
+  // either edge. clearInjectedInputFrame() removes both on the next frame.
   injectedReleased[idx] = true;
   injectedHeld[idx] = false;
 }
