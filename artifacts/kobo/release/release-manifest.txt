@@ -1,8 +1,9 @@
 release=CrossInk-Kobo Beta 1
 created_utc=2026-07-11T04:01:53Z
-git_head=b7f6708f96d05e5851f8bcfaaf57bc0e91dc0567
+git_head=2b06de63ff4189501513295c5d775d1fdc3989b2
+build_commit=2b06de63ff4189501513295c5d775d1fdc3989b2
 git_branch=codex/kobo-glo-hd-port
-git_dirty=yes
+git_dirty=no
 sources_lock_sha256=0698207a15d6d620a7a01e8dca13ac1ff076287c7dec02f64c20fd7f90106a48
 image_bytes=15590227968
 image_sha256=efabad5470b7c5d5e12e5aa82df9a97123ff42caf72ebe22d6ceb51f48baba69
