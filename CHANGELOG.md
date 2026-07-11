@@ -10,6 +10,10 @@
 
 - EPUB and TXT readers reserve the Kobo touch frame and use native high-density fonts and layout metrics when built for Kobo Linux.
 
+### Fixed
+
+- Kobo image assembly now preserves Buildroot root ownership under unprivileged builders, so Dropbear accepts the dedicated SSH key and system files retain their intended permissions.
+
 ## [v1.4.0] - 2026-07-10
 
 ### Added

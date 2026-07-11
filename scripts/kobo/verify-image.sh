@@ -118,6 +118,14 @@ grep -q '^ssh-ed25519 ' "$root_dump/root/.ssh/authorized_keys" || {
 	echo 'Dedicated public SSH key absent' >&2
 	exit 1
 }
+for path in / /root /root/.ssh /root/.ssh/authorized_keys /usr/bin/crossink-kobo; do
+	owner=$(debugfs -R "stat $path" "$work/p3.ext4" 2>/dev/null |
+		sed -n 's/^User:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*Group:[[:space:]]*\([0-9][0-9]*\).*/\1:\2/p')
+	[ "$owner" = 0:0 ] || {
+		echo "Unsafe rootfs ownership for $path: ${owner:-unreadable}, expected 0:0" >&2
+		exit 1
+	}
+done
 if find "$root_dump" -type f \( -name 'id_*' -o -name 'pass.txt' \) \
 	! -name 'authorized_keys' -print -quit | grep -q .; then
 	echo 'Secret-like filename found in rootfs' >&2

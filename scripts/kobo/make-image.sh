@@ -7,6 +7,19 @@ set -eu
 PATH=/usr/sbin:/sbin:$PATH
 export PATH
 
+# rootfs.tar contains the ownership produced by Buildroot's fakeroot stage.
+# Extracting it as an ordinary build user would silently rewrite every inode
+# to that user's uid/gid, which makes Dropbear reject /root/.ssh and can break
+# other daemons. Re-exec the complete filesystem assembly inside fakeroot so
+# tar, stat and mkfs.ext4 all observe the original numeric ownership.
+if [ "$(id -u)" -ne 0 ]; then
+	command -v fakeroot >/dev/null 2>&1 || {
+		echo 'fakeroot is required for unprivileged image assembly' >&2
+		exit 1
+	}
+	exec fakeroot -- "$0" "$@"
+fi
+
 usage() {
 	printf '%s\n' \
 		'Usage: make-image.sh --reference reference.img --zimage zImage --dtb n437.dtb --rootfs rootfs.tar --recovery recovery.tar --output crossink.img --size-bytes <exact-card-size>' \
@@ -29,7 +42,7 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 
-for tool in cat cmp dd sfdisk mkfs.ext4 mkimage tar sha256sum tail truncate touch wc; do
+for tool in cat cmp dd id sfdisk mkfs.ext4 mkimage tar sha256sum tail truncate touch wc; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "Missing tool: $tool" >&2; exit 1; }
 done
 for input in "$reference" "$zimage" "$dtb" "$rootfs" "$recovery"; do
