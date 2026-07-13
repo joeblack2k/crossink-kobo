@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <string>
 
 #include <unistd.h>
 
@@ -39,6 +40,19 @@ constexpr std::array<LogicalRegion, 4> kMixedRegions{{
     {96U, 320U, 880U, 80U},
     {704U, 840U, 256U, 320U},
 }};
+
+// These are queue-submission safety limits, not physical panel-settle times.
+// The pinned EPDC DRM UAPI offers no completion fence in userspace, therefore
+// no benchmark output may call them page-turn latency.
+constexpr std::int64_t kPartialSubmitDeadlineMicros = 2'000'000;
+constexpr std::int64_t kFullSubmitDeadlineMicros = 3'000'000;
+constexpr int kThermalStopMilliC = 75'000;
+constexpr int kThermalRiseStopMilliC = 15'000;
+
+enum class BenchmarkProfile : std::uint8_t {
+  Safe,
+  Fast,
+};
 
 void setPixel(Frame& frame, uint16_t logicalX, uint16_t logicalY, bool white) {
   if (logicalX >= KoboFbInkDisplay::kPortraitWidth || logicalY >= KoboFbInkDisplay::kPortraitHeight) return;
@@ -109,6 +123,18 @@ RefreshKind parseRefresh(const char* value, bool& ok) {
   return RefreshKind::Full;
 }
 
+BenchmarkProfile parseProfile(const char* value, bool& ok) {
+  ok = true;
+  if (std::strcmp(value, "safe") == 0) return BenchmarkProfile::Safe;
+  if (std::strcmp(value, "fast") == 0) return BenchmarkProfile::Fast;
+  ok = false;
+  return BenchmarkProfile::Safe;
+}
+
+const char* profileName(const BenchmarkProfile profile) {
+  return profile == BenchmarkProfile::Fast ? "Fast" : "Safe";
+}
+
 unsigned long parseUnsigned(const char* value, const unsigned long maximum, const bool allowZero, bool& ok) {
   char* end = nullptr;
   const unsigned long parsed = std::strtoul(value, &end, 10);
@@ -119,10 +145,10 @@ unsigned long parseUnsigned(const char* value, const unsigned long maximum, cons
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc < 2 || argc > 7) {
+  if (argc < 2 || argc > 9) {
     std::fprintf(stderr,
                  "usage: %s identity|clockwise|counterclockwise [fast|partial|full [iterations [delay-ms "
-                 "[--mixed] [--qualify-fast]]]]\n",
+                 "[--mixed] [--profile safe|fast] [--qualify-fast]]]]\n",
                  argv[0]);
     return 2;
   }
@@ -137,17 +163,25 @@ int main(int argc, char** argv) {
   if (!valid) return 2;
   bool qualifyFast = false;
   bool mixedPattern = false;
+  BenchmarkProfile profile = BenchmarkProfile::Safe;
   for (int index = 5; index < argc; ++index) {
-    if (std::strcmp(argv[index], "--qualify-fast") == 0) qualifyFast = true;
-    else if (std::strcmp(argv[index], "--mixed") == 0) mixedPattern = true;
-    else return 2;
+    if (std::strcmp(argv[index], "--qualify-fast") == 0) {
+      qualifyFast = true;
+    } else if (std::strcmp(argv[index], "--mixed") == 0) {
+      mixedPattern = true;
+    } else if (std::strcmp(argv[index], "--profile") == 0 && index + 1 < argc) {
+      profile = parseProfile(argv[++index], valid);
+      if (!valid) return 2;
+    } else {
+      return 2;
+    }
   }
   if (mixedPattern && transform != SourceTransform::Identity) {
     std::fputs("Mixed qualification only supports logical portrait identity\n", stderr);
     return 2;
   }
-  if (qualifyFast &&
-      (transform != SourceTransform::Identity || refresh != RefreshKind::Fast || iterations < 1000U || !mixedPattern)) {
+  if (qualifyFast && (profile != BenchmarkProfile::Fast || transform != SourceTransform::Identity ||
+                      refresh != RefreshKind::Fast || iterations < 1000U || !mixedPattern)) {
     std::fputs("Fast qualification requires identity transform, fast refresh, mixed regions and at least 1000 iterations\n",
                stderr);
     return 2;
@@ -166,16 +200,16 @@ int main(int argc, char** argv) {
 
   KoboDrmDisplay drm;
   if (drm.open()) {
-    // Qualification is deliberately stricter than a smoke run: it may only
-    // use the kernel-advertised performance policy and must abort on a missing
-    // thermal signal or an unsafe rise.  KoboCpuFreqGuard restores the prior
-    // governor on every return path.
+    // Fast runs are transient test runs, not a user-visible profile
+    // activation. They exercise exactly the kernel-advertised performance
+    // policy that Fast would request; the persistent marker remains reserved
+    // for a successful 1000-update physical qualification below.
     crossink::kobo::KoboCpuFreqGuard cpuBoost;
     const int baselineTemperature = crossink::kobo::readSocTemperatureMilliC();
     const int cpuBefore = cpuBoost.currentFrequencyKhz();
     const std::string governorBefore = cpuBoost.currentGovernor();
-    if (qualifyFast && (baselineTemperature < 0 || !cpuBoost.beginPerformanceBoost())) {
-      std::fprintf(stderr, "Fast qualification unavailable: temperature=%d cpu=%s\n", baselineTemperature,
+    if (profile == BenchmarkProfile::Fast && (baselineTemperature < 0 || !cpuBoost.beginPerformanceBoost())) {
+      std::fprintf(stderr, "Fast benchmark unavailable: temperature=%d cpu=%s\n", baselineTemperature,
                    cpuBoost.lastError().c_str());
       return 1;
     }
@@ -190,10 +224,7 @@ int main(int argc, char** argv) {
       filledRectangle(frame, logical.x, logical.y, logical.width, logical.height, (iteration % 2U) != 0U);
       const RefreshRegion region = toPanelRegion(logical);
       const auto submitted = std::chrono::steady_clock::now();
-      if (!drm.presentPackedMono(frame.data(), frame.size(), refresh, region)) {
-        std::fprintf(stderr, "DRM display refresh failed at iteration %lu: %d\n", iteration + 1, drm.lastError());
-        return 1;
-      }
+      const bool presented = drm.presentPackedMono(frame.data(), frame.size(), refresh, region);
       const auto completed = std::chrono::steady_clock::now();
       const auto submitMicrosValue =
           std::chrono::duration_cast<std::chrono::microseconds>(completed - submitted).count();
@@ -202,10 +233,20 @@ int main(int argc, char** argv) {
         return 1;
       }
       submitMicros[iteration] = static_cast<std::uint32_t>(submitMicrosValue);
-      if (qualifyFast && (iteration % 10U) == 0U) {
+      const std::int64_t deadline = refresh == RefreshKind::Full ? kFullSubmitDeadlineMicros : kPartialSubmitDeadlineMicros;
+      if (!presented || submitMicrosValue > deadline) {
+        std::fprintf(stderr,
+                     "profile=%s pattern=%s waveform=%s failed_iteration=%lu ioctl_failures=%u deadline_exceeded=%u "
+                     "submit_us=%lld errno=%d\n",
+                     profileName(profile), mixedPattern ? "mixed" : "fixed", refresh == RefreshKind::Fast ? "DU" :
+                     (refresh == RefreshKind::Partial ? "AUTO" : "GC16"), iteration + 1, presented ? 0U : 1U,
+                     submitMicrosValue > deadline ? 1U : 0U, static_cast<long long>(submitMicrosValue), drm.lastError());
+        return 1;
+      }
+      if (profile == BenchmarkProfile::Fast && (iteration % 10U) == 0U) {
         const int temperature = crossink::kobo::readSocTemperatureMilliC();
-        if (temperature < 0 || temperature >= 75000 || temperature - baselineTemperature >= 15000) {
-          std::fprintf(stderr, "Fast qualification thermal stop at iteration %lu: baseline=%d current=%d\n",
+        if (temperature < 0 || temperature >= kThermalStopMilliC || temperature - baselineTemperature >= kThermalRiseStopMilliC) {
+          std::fprintf(stderr, "Fast benchmark thermal stop at iteration %lu: baseline=%d current=%d\n",
                        iteration + 1, baselineTemperature, temperature);
           return 1;
         }
@@ -213,8 +254,8 @@ int main(int argc, char** argv) {
       if (delayMs > 0) ::usleep(delayMs * 1000UL);
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
-    if (qualifyFast && !cpuBoost.endPerformanceBoost()) {
-      std::fputs("Fast qualification governor restore failed\n", stderr);
+    if (profile == BenchmarkProfile::Fast && !cpuBoost.endPerformanceBoost()) {
+      std::fputs("Fast benchmark governor restore failed\n", stderr);
       return 1;
     }
     const int cpuAfter = cpuBoost.currentFrequencyKhz();
@@ -223,10 +264,12 @@ int main(int argc, char** argv) {
     std::printf("backend=drm geometry=%ux%u iterations=%lu elapsed_ms=%lld\n", KoboFbInkDisplay::kPortraitWidth,
                 KoboFbInkDisplay::kPortraitHeight, iterations, static_cast<long long>(elapsed.count()));
     const auto summary = crossink::kobo::summarizeDisplaySubmissionMicros(submitMicros.data(), iterations);
-    std::printf("pattern=%s waveform=%s submit_us_min=%u p50=%u p95=%u max=%u total=%llu cpu_before_khz=%d "
+    std::printf("profile=%s pattern=%s waveform=%s submit_us_min=%u p50=%u p95=%u max=%u total=%llu "
+                "ioctl_failures=0 deadline_exceeded=0 driver_waveforms=DU,AUTO,GC16 gc4_a2=not_exposed "
+                "cpu_before_khz=%d "
                 "cpu_during_khz=%d cpu_after_khz=%d governor_before=%s governor_during=%s governor_after=%s "
                 "temp_before_millic=%d temp_after_millic=%d\n",
-                mixedPattern ? "mixed" : "fixed", refresh == RefreshKind::Fast ? "DU" :
+                profileName(profile), mixedPattern ? "mixed" : "fixed", refresh == RefreshKind::Fast ? "DU" :
                 (refresh == RefreshKind::Partial ? "AUTO" : "GC16"), summary.minimumMicros, summary.p50Micros,
                 summary.p95Micros, summary.maximumMicros, static_cast<unsigned long long>(summary.totalMicros), cpuBefore,
                 cpuDuring, cpuAfter, governorBefore.c_str(), governorDuring.c_str(), governorAfter.c_str(),

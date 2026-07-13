@@ -6,23 +6,27 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: deploy-dev.sh --binary PATH --manifest PATH [--host SSH_ALIAS] [--version VERSION]
+Usage: deploy-dev.sh --binary PATH --manifest PATH [--display-smoke PATH] [--host SSH_ALIAS] [--version VERSION]
 
 Installs PATH as /opt/crossink/releases/VERSION/bin/crossink-kobo, atomically
 switches /opt/crossink/current, restarts the supervisor, and verifies the
 deployed SHA-256. The previous symlink target remains intact for rollback.
+When provided, --display-smoke installs the separately built diagnostic tool
+into the same versioned slot and verifies its SHA-256 after activation.
 EOF
   exit 2
 }
 
 binary=
 manifest=
+display_smoke=
 host=crossink-n437
 version=
 while (($#)); do
   case "$1" in
     --binary) binary=${2:?missing value}; shift 2 ;;
     --manifest) manifest=${2:?missing value}; shift 2 ;;
+    --display-smoke) display_smoke=${2:?missing value}; shift 2 ;;
     --host) host=${2:?missing value}; shift 2 ;;
     --version) version=${2:?missing value}; shift 2 ;;
     *) usage ;;
@@ -32,8 +36,18 @@ done
 [[ -n "$binary" && -n "$manifest" ]] || usage
 [[ -f "$binary" && -x "$binary" ]] || { echo "Missing executable: $binary" >&2; exit 1; }
 [[ -f "$manifest" ]] || { echo "Missing build manifest: $manifest" >&2; exit 1; }
+if [[ -n "$display_smoke" ]]; then
+  [[ -f "$display_smoke" && -x "$display_smoke" ]] || { echo "Missing display smoke executable: $display_smoke" >&2; exit 1; }
+fi
 
 local_sha=$(shasum -a 256 "$binary" | awk '{print $1}')
+display_smoke_sha=
+display_smoke_name=
+if [[ -n "$display_smoke" ]]; then
+  display_smoke_sha=$(shasum -a 256 "$display_smoke" | awk '{print $1}')
+  display_smoke_name=$(basename "$display_smoke")
+  [[ "$display_smoke_name" =~ ^[A-Za-z0-9._-]+$ ]] || { echo 'Invalid display smoke filename' >&2; exit 2; }
+fi
 if [[ -z "$version" ]]; then
   version="dev-${local_sha:0:12}"
 fi
@@ -60,9 +74,20 @@ tar -C "$(dirname "$binary")" -cf - "$(basename "$binary")" |
   ssh -o BatchMode=yes "$host" "set -eu; umask 077; mkdir -p '$remote_stage'; tar -C '$remote_stage' -xf -"
 tar -C "$(dirname "$manifest")" -cf - "$(basename "$manifest")" |
   ssh -o BatchMode=yes "$host" "set -eu; tar -C '$remote_stage' -xf -"
+if [[ -n "$display_smoke" ]]; then
+  tar -C "$(dirname "$display_smoke")" -cf - "$(basename "$display_smoke")" |
+    ssh -o BatchMode=yes "$host" "set -eu; tar -C '$remote_stage' -xf -"
+fi
 
 remote_sha=$(ssh -o BatchMode=yes "$host" "sha256sum '$remote_stage/$(basename "$binary")' | awk '{print \$1}'")
 [[ "$remote_sha" == "$local_sha" ]] || { echo "Transfer checksum mismatch: $remote_sha != $local_sha" >&2; exit 1; }
+if [[ -n "$display_smoke" ]]; then
+  remote_display_smoke_sha=$(ssh -o BatchMode=yes "$host" "sha256sum '$remote_stage/$display_smoke_name' | awk '{print \$1}'")
+  [[ "$remote_display_smoke_sha" == "$display_smoke_sha" ]] || {
+    echo "Display smoke transfer checksum mismatch: $remote_display_smoke_sha != $display_smoke_sha" >&2
+    exit 1
+  }
+fi
 
 ssh -o BatchMode=yes "$host" "
   set -eu
@@ -72,6 +97,9 @@ ssh -o BatchMode=yes "$host" "
   mkdir -p \"\$release/bin\"
   install -m 0755 \"\$stage/$(basename "$binary")\" \"\$release/bin/crossink-kobo\"
   install -m 0644 \"\$stage/$(basename "$manifest")\" \"\$release/build-manifest.txt\"
+  if [ -n '$display_smoke_name' ]; then
+    install -m 0755 "\$stage/$display_smoke_name" "\$release/bin/$display_smoke_name"
+  fi
   previous=none
   if [ -L /opt/crossink/current ]; then previous=\$(readlink /opt/crossink/current || printf broken); fi
   printf '%s\\n' \"\$previous\" > \"\$release/previous-release.txt\"
@@ -90,4 +118,11 @@ deployed_sha=$(ssh -o BatchMode=yes "$host" "sha256sum /opt/crossink/current/bin
   echo "Deployment checksum mismatch after activation: $deployed_sha != $local_sha" >&2
   exit 1
 }
+if [[ -n "$display_smoke" ]]; then
+  deployed_display_smoke_sha=$(ssh -o BatchMode=yes "$host" "sha256sum /opt/crossink/current/bin/$display_smoke_name | awk '{print \$1}'")
+  [[ "$deployed_display_smoke_sha" == "$display_smoke_sha" ]] || {
+    echo "Display smoke deployment checksum mismatch: $deployed_display_smoke_sha != $display_smoke_sha" >&2
+    exit 1
+  }
+fi
 ssh -o BatchMode=yes "$host" "printf 'deployed=%s\\nsha256=%s\\n' \"\$(readlink /opt/crossink/current)\" '$deployed_sha'"
