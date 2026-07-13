@@ -4,13 +4,26 @@
 set -u
 
 STATE_DIR=/data/.crossink/watchdog
+LOG_DIR=/data/.crossink/log
+CRASH_DIR=/data/.crossink/crash
+APP_LOG=$LOG_DIR/crossink.log
 ATTEMPTS_FILE=$STATE_DIR/early-start-failures
 RECOVERY_FLAG=/boot/flags/CROSSINK_FORCE_RECOVERY
 HEALTH_SECONDS=60
 app_pid=
 health_pid=
 
-mkdir -p "$STATE_DIR"
+mkdir -p "$STATE_DIR" "$LOG_DIR" "$CRASH_DIR"
+chmod 700 "$STATE_DIR" "$LOG_DIR" "$CRASH_DIR"
+if [ -e /boot/flags/CROSSINK_DEV_ENABLE ]; then
+	ulimit -c unlimited 2>/dev/null || true
+fi
+
+rotate_log() {
+	if [ -f "$APP_LOG" ] && [ "$(wc -c < "$APP_LOG")" -ge 1048576 ]; then
+		mv -f "$APP_LOG" "$APP_LOG.1"
+	fi
+}
 
 read_attempts() {
 	value=0
@@ -50,8 +63,11 @@ if [ "$attempts" -ge 3 ]; then enter_recovery watchdog; fi
 
 while :; do
 	application=$(find_application) || enter_recovery missing-application
+	rotate_log
+	if [ -f "$CRASH_DIR/core" ]; then mv -f "$CRASH_DIR/core" "$CRASH_DIR/core.previous"; fi
 	rm -f /run/crossink-healthy
-	"$application" &
+	printf '\n=== CrossInk start %s ===\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" >> "$APP_LOG"
+	(cd "$CRASH_DIR" && exec "$application") >> "$APP_LOG" 2>&1 &
 	app_pid=$!
 	(
 		sleep "$HEALTH_SECONDS"

@@ -3,8 +3,9 @@
 #include <array>
 #include <cstdint>
 
-#include "KoboFbInkDisplay.h"
 #include "KoboDrmDisplay.h"
+#include "KoboFbInkDisplay.h"
+#include "KoboRefreshExecutor.h"
 
 class HalDisplay {
  public:
@@ -26,6 +27,10 @@ class HalDisplay {
                             std::uint16_t height, bool fromProgmem = false) const;
   void displayBuffer(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
   void refreshDisplay(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
+  // Ask the refresh policy to clean the physical panel on the next present.
+  // Used for large activity transitions; ordinary reader page turns do not
+  // call this path.
+  void requestCleanRefresh();
   void deepSleep();
   std::uint8_t* getFrameBuffer() const;
 
@@ -44,6 +49,11 @@ class HalDisplay {
   [[nodiscard]] std::uint16_t getDisplayHeight() const { return DISPLAY_HEIGHT; }
   [[nodiscard]] std::uint16_t getDisplayWidthBytes() const { return DISPLAY_WIDTH_BYTES; }
   [[nodiscard]] std::uint32_t getBufferSize() const { return BUFFER_SIZE; }
+  [[nodiscard]] crossink::kobo::RefreshProfile refreshProfile() const { return refreshExecutor_.profile(); }
+  [[nodiscard]] const crossink::kobo::DisplayTelemetry& lastTelemetry() const {
+    return refreshExecutor_.lastTelemetry();
+  }
+  bool setRefreshProfile(crossink::kobo::RefreshProfile profile, bool soakPassed);
 
  private:
   static crossink::kobo::SourceTransform configuredTransform();
@@ -52,6 +62,11 @@ class HalDisplay {
   mutable std::array<std::uint8_t, BUFFER_SIZE> frameBuffer_{};
   crossink::kobo::KoboDrmDisplay drmDisplay_;
   crossink::kobo::KoboFbInkDisplay fbInkDisplay_;
+  crossink::kobo::KoboRefreshExecutor refreshExecutor_;
+  // Fast may only be used for the boot in which its device/kernel-qualified
+  // marker was checked.  Keep this separate from the selected enum so a
+  // missing or revoked marker cannot silently leave a fast scheduler active.
+  bool refreshProfileQualified_ = false;
   bool useDrm_ = false;
 };
 

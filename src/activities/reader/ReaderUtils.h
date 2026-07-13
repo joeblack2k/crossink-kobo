@@ -121,6 +121,11 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
 // Kept as a template to avoid std::function overhead; instantiated once per reader type.
 template <typename RenderFn>
 void renderAntiAliased(GfxRenderer& renderer, RenderFn&& renderFn) {
+  // Kobo's native DRM adapter deliberately has no ESP/X3 grayscale planes.
+  // Do not run the emulated LSB/MSB sequence on a backend that cannot commit
+  // those planes: it would present the temporary black plane and leave the
+  // restored BW buffer only in RAM.
+  if (!renderer.supportsStripGrayscale()) return;
   if (!renderer.storeBwBuffer()) {
     LOG_ERR("READER", "Failed to store BW buffer for anti-aliasing");
     return;

@@ -10,6 +10,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "components/DirectListTouch.h"
 #include "SdCardFontSystem.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -131,6 +132,15 @@ void FontSelectionActivity::loop() {
     SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
     sdFontSystem.ensureLoaded(renderer);
     finish();
+    return;
+  }
+
+  // A finger tap is an explicit choice, unlike a hardware Confirm press which
+  // first previews a newly highlighted font.  Select it immediately so the
+  // touchscreen never needs a second tap on the same row.
+  if (consumeDirectListTarget(mappedInput, static_cast<int>(fonts_.size()), selectedIndex_)) {
+    previewFontIndex_ = selectedIndex_;
+    handleSelection();
     return;
   }
 

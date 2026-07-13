@@ -2,7 +2,10 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <WiFi.h>
+#if !defined(KOBO_LINUX)
 #include <esp_mac.h>
+#endif
 
 #include <array>
 #include <cstring>
@@ -179,7 +182,17 @@ StatsLoadOutcome loadFromOpenFile(FsFile& f, GlobalReadingStats& out) {
 
 std::string localSyncedStatsFileName() {
   uint8_t mac[6] = {};
+#ifdef KOBO_LINUX
+  // The simulator's esp_mac shim deliberately returns a fixed development
+  // address.  A real Kobo must instead use its wlan0 MAC so two devices never
+  // overwrite or omit one another's synchronized reading statistics.
+  if (WiFi.macAddress(mac) == nullptr) return {};
+  bool hasNonZeroByte = false;
+  for (const uint8_t byte : mac) hasNonZeroByte = hasNonZeroByte || byte != 0;
+  if (!hasNonZeroByte) return {};
+#else
   if (esp_efuse_mac_get_default(mac) != 0) return {};
+#endif
 
   char name[32];
   snprintf(name, sizeof(name), "device_%02x%02x%02x%02x%02x%02x.bin", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);

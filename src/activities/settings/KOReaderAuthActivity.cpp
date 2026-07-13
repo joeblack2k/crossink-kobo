@@ -70,11 +70,14 @@ void KOReaderAuthActivity::onEnter() {
 void KOReaderAuthActivity::onExit() {
   Activity::onExit();
 
+  // Keep the Kobo's saved Wi-Fi connection available after authentication.
+#ifndef KOBO_LINUX
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
     silentRestart();
   }
+#endif
 }
 
 void KOReaderAuthActivity::render(RenderLock&&) {

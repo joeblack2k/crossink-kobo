@@ -15,6 +15,16 @@ namespace {
 constexpr uint8_t RECENT_BOOKS_FILE_VERSION = 3;
 constexpr char RECENT_BOOKS_FILE_BIN[] = "/.crosspoint/recent.bin";
 constexpr char RECENT_BOOKS_FILE_BAK[] = "/.crosspoint/recent.bin.bak";
+
+std::string collectionFromLibraryPath(const std::string& path) {
+  constexpr char booksRoot[] = "/Books/";
+  if (path.rfind(booksRoot, 0) != 0) return {};
+  const std::size_t segmentStart = sizeof(booksRoot) - 1;
+  const std::size_t separator = path.find('/', segmentStart);
+  // A book directly in /Books has no folder collection.
+  if (separator == std::string::npos || separator == segmentStart) return {};
+  return path.substr(segmentStart, separator - segmentStart);
+}
 }  // namespace
 
 void RecentBooksStore::toJson(JsonDocument& doc) const {
@@ -24,6 +34,9 @@ void RecentBooksStore::toJson(JsonDocument& doc) const {
     obj["path"] = book.path;
     obj["title"] = book.title;
     obj["author"] = book.author;
+    obj["series"] = book.series;
+    obj["seriesIndex"] = book.seriesIndex;
+    obj["collection"] = book.collection;
     obj["coverBmpPath"] = book.coverBmpPath;
   }
 }
@@ -40,6 +53,9 @@ bool RecentBooksStore::fromJson(JsonVariantConst doc) {
     book.path = obj["path"] | "";
     book.title = obj["title"] | "";
     book.author = obj["author"] | "";
+    book.series = obj["series"] | "";
+    book.seriesIndex = obj["seriesIndex"] | "";
+    book.collection = obj["collection"] | "";
     book.coverBmpPath = obj["coverBmpPath"] | "";
     recentBooks.push_back(book);
   }
@@ -54,9 +70,11 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
 }
 
 void RecentBooksStore::addOrUpdateBook(const std::string& path, const std::string& title, const std::string& author,
-                                       const std::string& coverBmpPath) {
+                                       const std::string& coverBmpPath, const std::string& series,
+                                       const std::string& seriesIndex, const std::string& collection) {
   // Drop stale entries first so a new add can't evict a valid book in their stead.
   pruneMissing();
+  const std::string effectiveCollection = collection.empty() ? collectionFromLibraryPath(path) : collection;
 
   // Remove existing entry if present
   auto it =
@@ -64,6 +82,9 @@ void RecentBooksStore::addOrUpdateBook(const std::string& path, const std::strin
   if (it != recentBooks.end()) {
     it->title = title;
     it->author = author;
+    if (!series.empty()) it->series = series;
+    if (!seriesIndex.empty()) it->seriesIndex = seriesIndex;
+    if (!effectiveCollection.empty()) it->collection = effectiveCollection;
     it->coverBmpPath = coverBmpPath;
     if (it != recentBooks.begin()) {
       RecentBook book = std::move(*it);
@@ -71,7 +92,8 @@ void RecentBooksStore::addOrUpdateBook(const std::string& path, const std::strin
       recentBooks.insert(recentBooks.begin(), std::move(book));
     }
   } else {
-    recentBooks.insert(recentBooks.begin(), {path, title, author, coverBmpPath});
+    recentBooks.insert(recentBooks.begin(),
+                       {path, title, author, series, seriesIndex, effectiveCollection, coverBmpPath});
     if (recentBooks.size() > MAX_RECENT_BOOKS) {
       recentBooks.resize(MAX_RECENT_BOOKS);
     }
@@ -80,7 +102,8 @@ void RecentBooksStore::addOrUpdateBook(const std::string& path, const std::strin
 }
 
 bool RecentBooksStore::updateBook(const std::string& path, const std::string& title, const std::string& author,
-                                  const std::string& coverBmpPath) {
+                                  const std::string& coverBmpPath, const std::string& series,
+                                  const std::string& seriesIndex, const std::string& collection) {
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it == recentBooks.end()) {
@@ -89,6 +112,9 @@ bool RecentBooksStore::updateBook(const std::string& path, const std::string& ti
   RecentBook& book = *it;
   book.title = title;
   book.author = author;
+  if (!series.empty()) book.series = series;
+  if (!seriesIndex.empty()) book.seriesIndex = seriesIndex;
+  if (!collection.empty()) book.collection = collection;
   book.coverBmpPath = coverBmpPath;
   saveToFile();
   return true;
@@ -144,17 +170,20 @@ RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
   if (FsHelpers::hasEpubExtension(lastBookFileName)) {
     Epub epub(path, "/.crosspoint");
     epub.load(false, true);
-    return RecentBook{path, epub.getTitle(), epub.getAuthor(), epub.getThumbBmpPath()};
+    const std::string collection = epub.getCollection().empty() ? collectionFromLibraryPath(path) : epub.getCollection();
+    return RecentBook{path, epub.getTitle(), epub.getAuthor(), epub.getSeries(), epub.getSeriesIndex(), collection,
+                      epub.getThumbBmpPath()};
   } else if (FsHelpers::hasXtcExtension(lastBookFileName)) {
     // Handle XTC file
     Xtc xtc(path, "/.crosspoint");
     if (xtc.load()) {
-      return RecentBook{path, xtc.getTitle(), xtc.getAuthor(), xtc.getThumbBmpPath()};
+      return RecentBook{path, xtc.getTitle(), xtc.getAuthor(), "", "", collectionFromLibraryPath(path),
+                        xtc.getThumbBmpPath()};
     }
   } else if (FsHelpers::hasTxtExtension(lastBookFileName) || FsHelpers::hasMarkdownExtension(lastBookFileName)) {
-    return RecentBook{path, lastBookFileName, "", ""};
+    return RecentBook{path, lastBookFileName, "", "", "", collectionFromLibraryPath(path), ""};
   }
-  return RecentBook{path, "", "", ""};
+  return RecentBook{path, "", "", "", "", "", ""};
 }
 
 bool RecentBooksStore::loadFromFile() {
@@ -163,6 +192,19 @@ bool RecentBooksStore::loadFromFile() {
     return true;
   }
   if (hasStoreFile) {
+    // A torn/corrupt recent-books JSON must never block boot. Preserve one
+    // inspectable copy and continue with an empty list; a later book open
+    // will atomically recreate recent.json. This is deliberately local to
+    // the non-essential recents store, not a policy for credentials/settings.
+    const std::string corruptPath = std::string(getFilePath()) + ".corrupt";
+    if (Storage.exists(corruptPath.c_str())) {
+      Storage.remove(corruptPath.c_str());
+    }
+    if (Storage.rename(getFilePath(), corruptPath.c_str())) {
+      LOG_ERR("RBS", "Quarantined unreadable recent books list at %s", corruptPath.c_str());
+    } else {
+      LOG_ERR("RBS", "Could not quarantine unreadable recent books list");
+    }
     return false;
   }
 

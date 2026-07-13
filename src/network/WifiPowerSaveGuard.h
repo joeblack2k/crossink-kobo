@@ -1,12 +1,12 @@
 #pragma once
 
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
 #include "esp_wifi.h"
 #endif
 
 class WifiPowerSaveGuard final {
  public:
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
   WifiPowerSaveGuard() {
     if (esp_wifi_get_ps(&previousMode_) == ESP_OK) {
       restorePreviousMode_ = true;
@@ -28,7 +28,7 @@ class WifiPowerSaveGuard final {
   WifiPowerSaveGuard& operator=(const WifiPowerSaveGuard&) = delete;
 
  private:
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
   wifi_ps_type_t previousMode_ = WIFI_PS_MIN_MODEM;
   bool restorePreviousMode_ = false;
 #endif

@@ -44,6 +44,7 @@ class UITheme {
 
  private:
   const ThemeMetrics* currentMetrics;
+  ThemeMetrics scaledMetrics{};
   std::unique_ptr<BaseTheme> currentTheme;
 };
 

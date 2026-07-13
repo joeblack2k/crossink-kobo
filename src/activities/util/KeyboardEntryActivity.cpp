@@ -6,7 +6,9 @@
 #include <algorithm>
 
 #include "MappedInputManager.h"
+#include "components/TouchUiRegistry.h"
 #include "components/UITheme.h"
+#include "platform/DeviceCapabilities.h"
 #include "fontIds.h"
 
 const char* const KeyboardEntryActivity::shiftString[2] = {"shift", "SHIFT"};
@@ -191,6 +193,22 @@ void KeyboardEntryActivity::mapColContentBottom(int& col, bool goingUp) const {
 
 void KeyboardEntryActivity::loop() {
   const int totalRows = getTotalRowCount();
+
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  MappedInputManager::TouchTarget touchTarget;
+  if (mappedInput.consumeTouchTarget(touchTarget) &&
+      touchTarget.kind == static_cast<unsigned char>(TouchUiRegistry::TargetKind::KeyboardKey) &&
+      touchTarget.primary >= 0 && touchTarget.primary < totalRows) {
+    const int maxCol = isBottomRow(touchTarget.primary) ? BOTTOM_KEY_COUNT : getContentColCount();
+    if (touchTarget.secondary >= 0 && touchTarget.secondary < maxCol) {
+      cursorMode = false;
+      selectedRow = touchTarget.primary;
+      selectedCol = touchTarget.secondary;
+      if (handleKeyPress()) requestUpdate();
+      return;
+    }
+  }
+#endif
 
   if (!cursorMode && mappedInput.wasPressed(MappedInputManager::Button::Up)) {
     upHeld = true;
@@ -397,7 +415,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
 
   const bool isPassword = (inputType == InputType::Password);
   int availableWidth = pageWidth;
-  if (gpio.deviceIsX3()) {
+  if (crossink::platform::deviceCapabilities(gpio).sideButtonsAreHorizontal) {
     availableWidth -= 2 * metrics.sideButtonHintsWidth;
   }
   const int effectiveMargin = (pageWidth - availableWidth * metrics.keyboardTextFieldWidthPercent / 100) / 2;
@@ -642,6 +660,9 @@ void KeyboardEntryActivity::render(RenderLock&&) {
 
     for (int col = 0; col < contentCols; col++) {
       const int keyX = rowLeftMargin + col * (keyWidth + keySpacing);
+#ifdef KOBO_LINUX
+      TOUCH_UI.registerDirect(keyX, rowY, keyWidth, keyHeight, TouchUiRegistry::TargetKind::KeyboardKey, row, col);
+#endif
       const bool isSelected = row == selectedRow && col == selectedCol;
       const bool activeKeySelected = isSelected && !cursorMode;
 
@@ -690,6 +711,10 @@ void KeyboardEntryActivity::render(RenderLock&&) {
 
   for (int i = 0; i < BOTTOM_KEY_COUNT; i++) {
     const int keyX = bottomLeftMargin + i * (bottomKeyWidth + bkSpacing);
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerDirect(keyX, bottomRowY, bottomKeyWidth, bottomKeyHeight, TouchUiRegistry::TargetKind::KeyboardKey,
+                            contentRows, i);
+#endif
     const bool isSelected = bottomSelected && i == selectedCol;
 
     const bool activeKeySelected = isSelected && !cursorMode;

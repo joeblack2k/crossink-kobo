@@ -13,7 +13,22 @@
 namespace {
 constexpr char FILENAME_FORMAT_AUTHOR_TITLE[] = "author_title";
 constexpr char FILENAME_FORMAT_TITLE_AUTHOR[] = "title_author";
+constexpr char kHexDigits[] = "0123456789abcdef";
 }  // namespace
+
+std::string opdsServerStableIdForUrl(const std::string& url) {
+  uint32_t hash = 2166136261u;
+  for (const unsigned char byte : url) {
+    hash ^= byte;
+    hash *= 16777619u;
+  }
+  std::string result(8, '0');
+  for (int index = 7; index >= 0; --index) {
+    result[static_cast<size_t>(index)] = kHexDigits[hash & 0x0fu];
+    hash >>= 4u;
+  }
+  return result;
+}
 
 const char* opdsFilenameFormatToJson(const OpdsFilenameFormat format) {
   switch (format) {
@@ -36,11 +51,13 @@ void OpdsServerStore::toJson(JsonDocument& doc) const {
   JsonArray arr = doc["servers"].to<JsonArray>();
   for (const auto& server : servers) {
     JsonObject obj = arr.add<JsonObject>();
+    obj["id"] = server.id;
     obj["name"] = server.name;
     obj["url"] = server.url;
     obj["username"] = server.username;
     obj["password_obf"] = obfuscation::obfuscateToBase64(server.password);
     obj["filenameFormat"] = opdsFilenameFormatToJson(server.filenameFormat);
+    obj["syncAllBooks"] = server.syncAllBooks;
   }
 }
 
@@ -55,10 +72,16 @@ bool OpdsServerStore::fromJson(JsonVariantConst doc) {
   for (JsonObjectConst obj : arr) {
     if (servers.size() >= OpdsServerStore::MAX_SERVERS) break;
     OpdsServer server;
+    server.id = obj["id"] | "";
     server.name = obj["name"] | "";
     server.url = obj["url"] | "";
     server.username = obj["username"] | "";
     server.filenameFormat = opdsFilenameFormatFromJson(obj["filenameFormat"] | "");
+    server.syncAllBooks = obj["syncAllBooks"] | false;
+    if (server.id.empty()) {
+      server.id = opdsServerStableIdForUrl(server.url);
+      needsResave = true;
+    }
     obfuscation::DecodeStatus status = obfuscation::DecodeStatus::INVALID;
     server.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", &status);
     if (status == obfuscation::DecodeStatus::LEGACY && !server.password.empty()) {
@@ -110,6 +133,7 @@ bool OpdsServerStore::migrateFromSettings() {
   OpdsServer server;
   server.name = "OPDS Server";
   server.url = SETTINGS.opdsServerUrl;
+  server.id = opdsServerStableIdForUrl(server.url);
   server.username = SETTINGS.opdsUsername;
   server.password = SETTINGS.opdsPassword;
   servers.push_back(std::move(server));
@@ -135,9 +159,14 @@ bool OpdsServerStore::addServer(const OpdsServer& server) {
     return false;
   }
 
-  servers.push_back(server);
+  OpdsServer persisted = server;
+  if (persisted.id.empty()) persisted.id = opdsServerStableIdForUrl(persisted.url);
+  const auto previous = servers;
+  servers.push_back(std::move(persisted));
   LOG_DBG("OPS", "Added server: %s", server.name.c_str());
-  return saveToFile();
+  if (saveToFile()) return true;
+  servers = previous;
+  return false;
 }
 
 bool OpdsServerStore::updateServer(size_t index, const OpdsServer& server) {
@@ -145,9 +174,15 @@ bool OpdsServerStore::updateServer(size_t index, const OpdsServer& server) {
     return false;
   }
 
-  servers[index] = server;
+  const auto previous = servers;
+  // URLs are editable transport details, never the catalog primary key.
+  OpdsServer persisted = server;
+  persisted.id = servers[index].id.empty() ? opdsServerStableIdForUrl(servers[index].url) : servers[index].id;
+  servers[index] = std::move(persisted);
   LOG_DBG("OPS", "Updated server: %s", server.name.c_str());
-  return saveToFile();
+  if (saveToFile()) return true;
+  servers = previous;
+  return false;
 }
 
 bool OpdsServerStore::removeServer(size_t index) {
@@ -155,9 +190,25 @@ bool OpdsServerStore::removeServer(size_t index) {
     return false;
   }
 
+  const auto previous = servers;
   LOG_DBG("OPS", "Removed server: %s", servers[index].name.c_str());
   servers.erase(servers.begin() + static_cast<ptrdiff_t>(index));
-  return saveToFile();
+  if (saveToFile()) return true;
+  servers = previous;
+  return false;
+}
+
+bool OpdsServerStore::makePrimary(const size_t index) {
+  if (index >= servers.size()) return false;
+  if (index == 0) return true;
+  const auto previous = servers;
+  OpdsServer selected = std::move(servers[index]);
+  servers.erase(servers.begin() + static_cast<ptrdiff_t>(index));
+  servers.insert(servers.begin(), std::move(selected));
+  LOG_DBG("OPS", "Set primary server: %s", servers.front().name.c_str());
+  if (saveToFile()) return true;
+  servers = previous;
+  return false;
 }
 
 const OpdsServer* OpdsServerStore::getServer(size_t index) const {
@@ -165,4 +216,10 @@ const OpdsServer* OpdsServerStore::getServer(size_t index) const {
     return nullptr;
   }
   return &servers[index];
+}
+
+size_t OpdsServerStore::indexForId(const std::string& id) const {
+  const auto found =
+      std::find_if(servers.begin(), servers.end(), [&](const OpdsServer& server) { return server.id == id; });
+  return found == servers.end() ? MAX_SERVERS : static_cast<size_t>(std::distance(servers.begin(), found));
 }

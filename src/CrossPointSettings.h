@@ -198,6 +198,16 @@ class CrossPointSettings {
     FILE_BROWSER_DISPLAY_2_LINES = 1,
     FILE_BROWSER_DISPLAY_COUNT
   };
+  enum KOBO_LIBRARY_SORT { KOBO_LIBRARY_SORT_RECENT = 0, KOBO_LIBRARY_SORT_TITLE = 1, KOBO_LIBRARY_SORT_COUNT };
+  enum KOBO_LIBRARY_FILTER {
+    KOBO_LIBRARY_FILTER_ALL = 0,
+    KOBO_LIBRARY_FILTER_UNREAD = 1,
+    KOBO_LIBRARY_FILTER_COMPLETED = 2,
+    KOBO_LIBRARY_FILTER_COUNT
+  };
+#ifdef KOBO_LINUX
+  enum KOBO_REFRESH_PROFILE { KOBO_REFRESH_SAFE = 0, KOBO_REFRESH_FAST = 1, KOBO_REFRESH_PROFILE_COUNT };
+#endif
 
   // Short power button press actions
   enum SHORT_PWRBTN {
@@ -303,7 +313,14 @@ class CrossPointSettings {
   };
 
   // Sleep screen settings
+  // The Glo HD's useful default is a readable cover/progress card before
+  // suspend, not a blank/dark ESP-oriented screen.  Existing user settings
+  // remain untouched and all platforms still expose the full chooser.
+#ifdef KOBO_LINUX
+  uint8_t sleepScreen = MINIMAL_SLEEP;
+#else
   uint8_t sleepScreen = DARK;
+#endif
   // Sleep screen cover mode settings
   uint8_t sleepScreenCoverMode = FIT;
   // Sleep screen cover filter
@@ -339,7 +356,11 @@ class CrossPointSettings {
   uint8_t textAntiAliasing = 1;
   uint8_t readerDarkMode = 0;
   // Short power button action behaviour
+#ifdef KOBO_LINUX
+  uint8_t shortPwrBtn = SLEEP;
+#else
   uint8_t shortPwrBtn = IGNORE;
+#endif
   // Long power button action behaviour
   uint8_t longPwrBtn = SLEEP;
   // EPUB reading orientation settings
@@ -388,6 +409,18 @@ class CrossPointSettings {
   // White-only Kobo Glo HD frontlight percentage.
   uint8_t frontlightBrightness = 20;
 #endif
+#ifdef KOBO_LINUX
+  // Glo HD's 300 ppi panel needs a larger touch UI than the X4 baseline.
+  // Reader typography remains a separate setting.
+  uint8_t koboUiScalePercent = 200;
+  // Fast remains rejected unless the N437/kernel-specific qualification file
+  // proves its full physical soak. MaxBeta is never persisted or exposed.
+  uint8_t koboRefreshProfile = KOBO_REFRESH_SAFE;
+  // The USB/Wi-Fi web transfer service is a normal always-available Kobo
+  // feature. Users can disable it explicitly, but a new install is on and
+  // keeps that choice across restarts.
+  uint8_t koboWebTransferEnabled = 1;
+#endif
   uint8_t hyphenationEnabled = 0;
 
   // Reader screen margin settings
@@ -406,6 +439,11 @@ class CrossPointSettings {
   uint8_t uiTheme = LYRA;
   // Recent Books screen layout
   uint8_t recentBooksView = RECENT_BOOKS_LIST;
+  // The cover-grid is shared by Kobo, simulator and ESP builds. Persist these
+  // presentation preferences on every target instead of letting a platform
+  // guard turn one shared activity into a different source variant.
+  uint8_t koboLibrarySort = KOBO_LIBRARY_SORT_RECENT;
+  uint8_t koboLibraryFilter = KOBO_LIBRARY_FILTER_ALL;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
   // Quick-return from footnotes when a footnote shortcut is active.

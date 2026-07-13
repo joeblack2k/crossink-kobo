@@ -841,6 +841,19 @@ void XtcReaderActivity::renderPage() {
       }
     }
 
+    // XTH's two-plane antialiasing format is valid input, but Kobo's DRM
+    // adapter does not implement the ESP/X3 grayscale-plane protocol.  Keep
+    // the document usable by presenting the already composed monochrome
+    // frame; attempting LSB/MSB compatibility calls would display their
+    // temporary black plane on the physical N437.
+    if (!renderer.supportsStripGrayscale()) {
+      ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+      free(pageBuffer);
+      LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit source, Kobo BW fallback)", currentPage + 1,
+              xtc->getPageCount());
+      return;
+    }
+
     if (pagesUntilFullRefresh <= 1) {
       // Periodic ghost cleanup: scrub via the normal path, then run the
       // settle flavor of the grayscale base pass (DTM planes are equal after

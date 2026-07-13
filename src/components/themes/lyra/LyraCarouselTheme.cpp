@@ -1,5 +1,9 @@
 #include "LyraCarouselTheme.h"
 
+#ifdef KOBO_LINUX
+#include "components/TouchUiRegistry.h"
+#endif
+
 #include <Bitmap.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -16,6 +20,7 @@
 
 #include "RecentBooksStore.h"
 #include "activities/reader/BookReadingStats.h"
+#include "components/KoboIconMetrics.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
@@ -81,18 +86,24 @@ constexpr int kButtonHintsH = LyraCarouselMetrics::values.buttonHintsHeight;
 struct MenuLayoutMetrics {
   int tileH;
   int tileW;
+  int iconSize;
+  int iconPad;
   int labelLineHeight;
   int rowY;
   int labelY;
 };
 
 MenuLayoutMetrics computeMenuLayout(const GfxRenderer& renderer, int buttonCount) {
-  const int tileH = kMenuIconPad + kMenuIconSize + kMenuIconPad;
+  const auto& activeMetrics = UITheme::getInstance().getMetrics();
+  const int iconSize = KoboIconMetrics::menuSize(activeMetrics, kMenuIconSize);
+  const int tileH = std::max(activeMetrics.menuRowHeight, kMenuIconPad + iconSize + kMenuIconPad);
+  const int iconPad = std::max(kMenuIconPad, (tileH - iconSize) / 2);
   const int labelLineHeight = renderer.getLineHeight(kMenuLabelFontId);
   const int rowY = renderer.getScreenHeight() - kButtonHintsH - tileH - kMenuLabelTopGap - labelLineHeight -
                    kMenuLabelBottomGap + kMenuRowDrop;
   return {
-      tileH, renderer.getScreenWidth() / buttonCount, labelLineHeight, rowY, rowY - kMenuLabelTopGap - labelLineHeight,
+      tileH, renderer.getScreenWidth() / buttonCount,   iconSize, iconPad, labelLineHeight,
+      rowY,  rowY - kMenuLabelTopGap - labelLineHeight,
   };
 }
 
@@ -172,11 +183,11 @@ Rect computeCenterCoverSlotRect(const GfxRenderer& renderer, Rect rect, const st
   return Rect{centerX, centerDrawY, kDisplayCenterW, kDisplayCenterH};
 }
 
-void drawMenuBookmarkIcon(const GfxRenderer& renderer, int x, int y, bool selected) {
-  constexpr int ribbonWidth = 16;
-  constexpr int ribbonHeight = 22;
-  constexpr int notchSize = 6;
-  const int iconX = x + (kMenuIconSize - ribbonWidth) / 2;
+void drawMenuBookmarkIcon(const GfxRenderer& renderer, int x, int y, int iconSize, bool selected) {
+  const int ribbonWidth = std::max(16, iconSize / 2);
+  const int ribbonHeight = std::max(22, iconSize * 11 / 16);
+  const int notchSize = std::max(6, iconSize * 3 / 16);
+  const int iconX = x + (iconSize - ribbonWidth) / 2;
   const int iconY = y + 4;
   const int centerX = iconX + ribbonWidth / 2;
 
@@ -358,12 +369,14 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     constexpr int kFallbackTitlePadX = 14;
     constexpr int kFallbackTitlePadBottom = 14;
     constexpr int kFallbackIconGap = 10;
-    const int iconX = outRect.x + outRect.width / 2 - 16;
+    constexpr int sourceIconSize = 32;
+    const int iconSize = KoboIconMetrics::coverPlaceholderSize(sourceIconSize, outRect.width, outRect.height);
+    const int iconX = outRect.x + (outRect.width - iconSize) / 2;
     const int iconY = outRect.y + outRect.height / 3 + 14;
-    renderer.drawIcon(CoverIcon, iconX, iconY, 32, 32);
+    KoboIconMetrics::drawScaledSquare(renderer, CoverIcon, iconX, iconY, sourceIconSize, iconSize);
 
     const int fallbackTitleX = outRect.x + kFallbackTitlePadX;
-    const int fallbackTitleY = iconY + 32 + kFallbackIconGap;
+    const int fallbackTitleY = iconY + iconSize + kFallbackIconGap;
     const int fallbackTitleW = outRect.width - kFallbackTitlePadX * 2;
     const int fallbackTitleH = outRect.y + outRect.height - kFallbackTitlePadBottom - fallbackTitleY;
     const int fallbackLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
@@ -516,12 +529,15 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
 
   for (int i = 0; i < buttonCount; ++i) {
     const int tileX = i * metrics.tileW;
-    const int iconX = tileX + (metrics.tileW - kMenuIconSize) / 2;
-    const int iconY = metrics.rowY + kMenuIconPad;
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerItem(tileX, metrics.rowY, metrics.tileW, metrics.tileH, selectedIndex, i, buttonCount);
+#endif
+    const int iconX = tileX + (metrics.tileW - metrics.iconSize) / 2;
+    const int iconY = metrics.rowY + metrics.iconPad;
 
     const bool selected = (selectedIndex == i);
     if (selected) {
-      const int highlightSize = kMenuIconSize + 2 * kHighlightPad;
+      const int highlightSize = metrics.iconSize + 2 * kHighlightPad;
       const int highlightY = metrics.rowY + (metrics.tileH - highlightSize) / 2;
       renderer.fillRoundedRect(iconX - kHighlightPad, highlightY, highlightSize, highlightSize, kCornerRadius,
                                Color::Black);
@@ -530,14 +546,11 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
     if (rowIcon != nullptr) {
       const UIIcon icon = rowIcon(i);
       if (icon == UIIcon::BookmarkIcon) {
-        drawMenuBookmarkIcon(renderer, iconX, iconY, selected);
+        drawMenuBookmarkIcon(renderer, iconX, iconY, metrics.iconSize, selected);
       } else {
         const uint8_t* bmp = iconForName(icon, kMenuIconSize);
         if (bmp != nullptr) {
-          if (selected)
-            renderer.drawIconInverted(bmp, iconX, iconY, kMenuIconSize, kMenuIconSize);
-          else
-            renderer.drawIcon(bmp, iconX, iconY, kMenuIconSize, kMenuIconSize);
+          KoboIconMetrics::drawScaledSquare(renderer, bmp, iconX, iconY, kMenuIconSize, metrics.iconSize, !selected);
         }
       }
     }
@@ -562,9 +575,9 @@ void LyraCarouselTheme::drawButtonMenuSelectionOverlay(const GfxRenderer& render
   const MenuLayoutMetrics metrics = computeMenuLayout(renderer, buttonCount);
 
   const int tileX = selectedIndex * metrics.tileW;
-  const int iconX = tileX + (metrics.tileW - kMenuIconSize) / 2;
-  const int iconY = metrics.rowY + kMenuIconPad;
-  const int highlightSize = kMenuIconSize + 2 * kHighlightPad;
+  const int iconX = tileX + (metrics.tileW - metrics.iconSize) / 2;
+  const int iconY = metrics.rowY + metrics.iconPad;
+  const int highlightSize = metrics.iconSize + 2 * kHighlightPad;
   const int highlightY = metrics.rowY + (metrics.tileH - highlightSize) / 2;
 
   renderer.fillRoundedRect(iconX - kHighlightPad, highlightY, highlightSize, highlightSize, kCornerRadius,
@@ -573,11 +586,11 @@ void LyraCarouselTheme::drawButtonMenuSelectionOverlay(const GfxRenderer& render
   if (rowIcon != nullptr) {
     const UIIcon icon = rowIcon(selectedIndex);
     if (icon == UIIcon::BookmarkIcon) {
-      drawMenuBookmarkIcon(renderer, iconX, iconY, true);
+      drawMenuBookmarkIcon(renderer, iconX, iconY, metrics.iconSize, true);
     } else {
       const uint8_t* bmp = iconForName(icon, kMenuIconSize);
       if (bmp != nullptr) {
-        renderer.drawIconInverted(bmp, iconX, iconY, kMenuIconSize, kMenuIconSize);
+        KoboIconMetrics::drawScaledSquare(renderer, bmp, iconX, iconY, kMenuIconSize, metrics.iconSize, false);
       }
     }
   }
@@ -604,5 +617,5 @@ void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int ite
                                  const std::function<bool(int index)>& rowDimmed,
                                  const std::function<bool(int index)>& isHeader) const {
   drawListWithMetrics(renderer, rect, itemCount, selectedIndex, rowTitle, rowSubtitle, rowIcon, rowValue,
-                      highlightValue, rowDimmed, isHeader, LyraCarouselMetrics::values, true);
+                      highlightValue, rowDimmed, isHeader, UITheme::getInstance().getMetrics(), true);
 }

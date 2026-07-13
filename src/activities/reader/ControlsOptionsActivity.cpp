@@ -10,6 +10,7 @@
 #include "MappedInputManager.h"
 #include "SettingsList.h"
 #include "activities/settings/ButtonRemapActivity.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -196,6 +197,8 @@ void ControlsOptionsActivity::toggleCurrentSetting() {
 
 void ControlsOptionsActivity::loop() {
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+
+  consumeDirectListSelection(mappedInput, settingsCount, selectedIndex);
 
   buttonNavigator.onNextRelease([this] {
     moveSelection(true);

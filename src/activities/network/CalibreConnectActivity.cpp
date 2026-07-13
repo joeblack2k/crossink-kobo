@@ -57,11 +57,15 @@ void CalibreConnectActivity::onExit() {
 
   MDNS.end();
 
+  // ESP targets reclaim fragmented network heap here.  Kobo has a normal
+  // Linux network stack, so do not drop an otherwise healthy STA connection.
+#ifndef KOBO_LINUX
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
     silentRestart();
   }
+#endif
 }
 
 void CalibreConnectActivity::onWifiSelectionComplete(const bool connected) {

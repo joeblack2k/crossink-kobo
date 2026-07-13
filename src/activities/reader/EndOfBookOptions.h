@@ -31,7 +31,7 @@ class EndOfBookOptions {
   // Back press returns to the last page of the book. Fills openPath when the result is
   // OpenBook. Returns Action::None when nothing relevant was pressed; callers continue
   // their normal input path (keeping long-press Back to the file browser working).
-  Action handleMenuInput(const MappedInputManager& input, std::string* openPath);
+  Action handleMenuInput(MappedInputManager& input, std::string* openPath);
 
   // Draws the full end screen (plain title, or the suggestion menu) onto a cleared buffer.
   void render(GfxRenderer& renderer, const MappedInputManager& input) const;

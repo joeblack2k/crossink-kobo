@@ -2,8 +2,12 @@
 
 #include <Arduino.h>
 #include <Logging.h>
+#if defined(KOBO_LINUX)
+#include <KoboOwnedMutex.h>
+#else
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#endif
 
 #include <atomic>
 #include <cstdlib>
@@ -16,9 +20,16 @@ bool gBorrowed = false;
 bool gReleasePending = false;
 const char* gLeaseOwner = nullptr;
 const char* gBorrowOwner = nullptr;
+#if defined(KOBO_LINUX)
+crossink::kobo::KoboOwnedMutex gMutex;
+#else
 std::atomic<SemaphoreHandle_t> gMutex{nullptr};
+#endif
 
 bool ensureMutex() {
+#if defined(KOBO_LINUX)
+  return true;
+#else
   SemaphoreHandle_t mutex = gMutex.load(std::memory_order_acquire);
   if (mutex) return true;
 
@@ -30,7 +41,7 @@ bool ensureMutex() {
 
   mutex = nullptr;
   if (!gMutex.compare_exchange_strong(mutex, created, std::memory_order_release, std::memory_order_acquire)) {
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
     // The pinned POSIX FreeRTOS shim owns its mutex with plain new/delete and
     // does not expose vSemaphoreDelete().
     delete created;
@@ -39,17 +50,27 @@ bool ensureMutex() {
 #endif
   }
   return true;
+#endif
 }
 
 bool lock() {
+#if defined(KOBO_LINUX)
+  gMutex.lock();
+  return true;
+#else
   if (!ensureMutex()) return false;
   SemaphoreHandle_t mutex = gMutex.load(std::memory_order_acquire);
   return mutex && xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE;
+#endif
 }
 
 void unlock() {
+#if defined(KOBO_LINUX)
+  gMutex.unlock();
+#else
   SemaphoreHandle_t mutex = gMutex.load(std::memory_order_acquire);
   if (mutex) xSemaphoreGive(mutex);
+#endif
 }
 
 }  // namespace

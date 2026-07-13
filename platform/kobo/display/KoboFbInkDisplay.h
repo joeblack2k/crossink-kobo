@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "KoboDisplayTypes.h"
+
 namespace crossink::kobo {
 
 enum class RefreshKind : uint8_t {
@@ -56,6 +58,7 @@ class KoboFbInkDisplay {
   // refresh it.  Full is used after boot and periodically; Fast/Partial are
   // safe non-flashing modes until waveform measurements permit faster tuning.
   bool presentPackedMono(const uint8_t* packed, size_t packedSize, RefreshKind kind);
+  bool presentPackedMono(const uint8_t* packed, size_t packedSize, RefreshKind kind, const RefreshRegion& region);
 
   // The caller records every failure in /data/.crossink/crash; this avoids
   // mutating persistent state from a lowest-level display adapter.

@@ -1,7 +1,7 @@
 #include "JsonSettingsIO.h"
 
 #include <ArduinoJson.h>
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
 #include <ArduinoJsonStringCompat.h>
 #endif
 #include <HalStorage.h>
@@ -90,6 +90,36 @@ bool isSleepScreenSetting(const SettingInfo& info) { return info.key && strcmp(i
 
 constexpr uint8_t TILT_DIRECTION_SCHEMA_CURRENT = 2;
 
+bool writeJsonAtomically(const char* module, const char* path, const JsonDocument& doc) {
+  const std::string temporaryPath = std::string(path) + ".tmp";
+  if (Storage.exists(temporaryPath.c_str()) && !Storage.remove(temporaryPath.c_str())) {
+    LOG_ERR(module, "Failed to remove stale JSON temporary file: %s", path);
+    return false;
+  }
+
+  HalFile output;
+  if (!Storage.openFileForWrite(module, temporaryPath, output)) {
+    LOG_ERR(module, "Failed to open JSON temporary file: %s", path);
+    return false;
+  }
+  const size_t expected = measureJson(doc);
+  const size_t written = serializeJson(doc, output);
+  const bool complete = written == expected && output.sync() && output.close();
+  if (!complete) {
+    output.close();
+    Storage.remove(temporaryPath.c_str());
+    LOG_ERR(module, "Failed to sync JSON temporary file: %s (%u/%u bytes)", path,
+            static_cast<unsigned>(written), static_cast<unsigned>(expected));
+    return false;
+  }
+  if (!Storage.rename(temporaryPath.c_str(), path)) {
+    Storage.remove(temporaryPath.c_str());
+    LOG_ERR(module, "Failed to atomically replace JSON file: %s", path);
+    return false;
+  }
+  return true;
+}
+
 uint8_t migrateTiltDirectionValue(uint8_t direction) {
   if (direction == CrossPointSettings::TILT_LEFT_RIGHT) {
     return CrossPointSettings::TILT_LEFT_RIGHT_INVERTED;
@@ -119,9 +149,7 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   doc["pendingClippingIndex"] = s.pendingClippingIndex;
   doc["showBootScreen"] = s.showBootScreen;
 
-  String json;
-  serializeJson(doc, json);
-  return Storage.writeFile(path, json);
+  return writeJsonAtomically("CPS", path, doc);
 }
 
 bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
@@ -213,10 +241,10 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Separate from the legacy clock sync flag because older builds synced time
   // only, leaving the RTC date registers at their placeholder/default value.
   doc["clockDateHasBeenSynced"] = s.clockDateHasBeenSynced;
+  doc["koboLibrarySort"] = s.koboLibrarySort;
+  doc["koboLibraryFilter"] = s.koboLibraryFilter;
 
-  String json;
-  serializeJson(doc, json);
-  return Storage.writeFile(path, json);
+  return writeJsonAtomically("CPS", path, doc);
 }
 
 bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool* needsResave) {
@@ -409,6 +437,13 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     s.language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));
   }
   s.clockDateHasBeenSynced = clamp(doc["clockDateHasBeenSynced"] | (uint8_t)0, (uint8_t)2, (uint8_t)0);
+  s.koboLibrarySort = clamp(doc["koboLibrarySort"] | static_cast<uint8_t>(CrossPointSettings::KOBO_LIBRARY_SORT_RECENT),
+                            static_cast<uint8_t>(CrossPointSettings::KOBO_LIBRARY_SORT_COUNT),
+                            static_cast<uint8_t>(CrossPointSettings::KOBO_LIBRARY_SORT_RECENT));
+  s.koboLibraryFilter =
+      clamp(doc["koboLibraryFilter"] | static_cast<uint8_t>(CrossPointSettings::KOBO_LIBRARY_FILTER_ALL),
+            static_cast<uint8_t>(CrossPointSettings::KOBO_LIBRARY_FILTER_COUNT),
+            static_cast<uint8_t>(CrossPointSettings::KOBO_LIBRARY_FILTER_ALL));
 
   LOG_DBG("CPS", "Settings loaded from file");
 

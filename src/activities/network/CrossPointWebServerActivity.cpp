@@ -24,7 +24,10 @@
 namespace {
 // AP Mode configuration
 constexpr const char* AP_SSID = "CrossPoint-Reader";
-constexpr const char* AP_PASSWORD = nullptr;  // Open network for ease of use
+// An empty string means that this legacy ESP-oriented flow cannot silently
+// dereference a null password.  Kobo's final hotspot implementation supplies
+// a per-session password; Home never auto-starts this mode.
+constexpr char AP_PASSWORD[] = "";
 constexpr const char* AP_HOSTNAME = "crosspoint";
 constexpr uint8_t AP_CHANNEL = 1;
 constexpr uint8_t AP_MAX_CONNECTIONS = 4;
@@ -78,6 +81,18 @@ void CrossPointWebServerActivity::onEnter() {
   lastHandleClientTime = 0;
   requestUpdate();
 
+#ifdef KOBO_LINUX
+  // The persistent Kobo service is owned by main(), not this status page.
+  // 192.168.7.2 is the documented USB-gadget address for dev/final images.
+  koboUsbTransfer = true;
+  isApMode = false;
+  connectedSSID = "USB network";
+  connectedIP = "192.168.7.2";
+  state = WebServerActivityState::SERVER_RUNNING;
+  requestUpdate();
+  return;
+#endif
+
   if (hasInitialNetworkMode) {
     onNetworkModeSelected(initialNetworkMode);
     return;
@@ -115,6 +130,10 @@ void CrossPointWebServerActivity::onExit() {
   }
   delay(50);
 
+  // Kobo keeps its existing WLAN association and USB gadget up on exit; an
+  // ESP-style heap-defragmenting restart would be a visible, unnecessary
+  // reboot and may interrupt an in-flight book-state write.
+#ifndef KOBO_LINUX
   // Skip reboot if WiFi was never activated (e.g. user backed out of mode selection).
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     if (isApMode) {
@@ -125,6 +144,7 @@ void CrossPointWebServerActivity::onExit() {
     delay(30);
     silentRestart();
   }
+#endif
 
   LOG_DBG("WEBACT", "Free heap at onExit end: %d bytes", ESP.getFreeHeap());
 }
@@ -226,7 +246,7 @@ void CrossPointWebServerActivity::startAccessPoint() {
 
   // Start soft AP
   bool apStarted;
-  if (AP_PASSWORD && strlen(AP_PASSWORD) >= 8) {
+  if (strlen(AP_PASSWORD) >= 8) {
     apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
   } else {
     // Open network (no password)
@@ -319,7 +339,7 @@ void CrossPointWebServerActivity::loop() {
     }
 
     // STA mode: Monitor WiFi connection health
-    if (!isApMode && webServer && webServer->isRunning()) {
+    if (!isApMode && !koboUsbTransfer && webServer && webServer->isRunning()) {
       static unsigned long lastWifiCheck = 0;
       if (millis() - lastWifiCheck > 2000) {  // Check every 2 seconds
         lastWifiCheck = millis();
@@ -482,6 +502,20 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 100,
                       ipUrl.c_str());
   } else {
+#ifdef KOBO_LINUX
+    if (koboUsbTransfer) {
+      renderer.drawCenteredText(UI_10_FONT_ID, startY, "USB web upload", true, EpdFontFamily::BOLD);
+      startY += height10 + metrics.verticalSpacing * 2;
+      renderer.drawCenteredText(UI_10_FONT_ID, startY, "http://192.168.7.2/", true);
+      startY += height10 + metrics.verticalSpacing;
+      renderer.drawCenteredText(SMALL_FONT_ID, startY, "EPUB upload is ready", true);
+      if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
+        startY += height10 + metrics.verticalSpacing * 2;
+        const std::string wifiUrl = "Wi-Fi: http://" + std::string(WiFi.localIP().toString().c_str());
+        renderer.drawCenteredText(UI_10_FONT_ID, startY, wifiUrl.c_str(), true, EpdFontFamily::BOLD);
+      }
+    } else {
+#endif
     startY += metrics.verticalSpacing * 2;
 
     // STA mode display (original behavior)
@@ -504,6 +538,9 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     // Also show hostname URL
     std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + AP_HOSTNAME + ".local/";
     renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
+#ifdef KOBO_LINUX
+    }
+#endif
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");

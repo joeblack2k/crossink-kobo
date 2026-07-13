@@ -53,23 +53,16 @@ unsigned long HalGPIO::getHeldTime() const { return powerKey_.heldMilliseconds()
 
 unsigned long HalGPIO::getPowerButtonHeldTime() const { return powerKey_.heldMilliseconds(); }
 
-void HalGPIO::startDeepSleep() {
+crossink::kobo::KoboSuspendResult HalGPIO::startDeepSleep() {
   crossink::kobo::KoboFrontlightSysfs frontlight;
   const bool haveFrontlight = frontlight.discover();
   const int savedBrightness = haveFrontlight ? frontlight.percentage() : -1;
   if (haveFrontlight) (void)frontlight.setPercentage(0);
-  const int fd = ::open("/sys/power/state", O_WRONLY | O_CLOEXEC);
-  if (fd < 0) {
-    std::fprintf(stderr, "[KOBO] cannot open /sys/power/state\n");
-    if (savedBrightness >= 0) (void)frontlight.setPercentage(savedBrightness);
-    return;
-  }
-  constexpr char state[] = "mem\n";
-  if (::write(fd, state, sizeof(state) - 1) != static_cast<ssize_t>(sizeof(state) - 1)) {
-    std::fprintf(stderr, "[KOBO] suspend request failed\n");
-  }
-  ::close(fd);
+  auto result = crossink::kobo::KoboSuspendController::suspendToRam(
+      {"frontlight_off=" + std::to_string(savedBrightness >= 0 ? 1 : 0)});
+  if (!result.entered) std::fprintf(stderr, "[KOBO] suspend request failed: %s\n", result.detail.c_str());
   if (savedBrightness >= 0) (void)frontlight.setPercentage(savedBrightness);
+  return result;
 }
 
 void HalGPIO::verifyPowerButtonWakeup(std::uint16_t /*requiredDurationMs*/, bool /*shortPressAllowed*/) {}

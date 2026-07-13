@@ -17,7 +17,7 @@
 #include <ScratchWorkspace.h>
 #include <builtinFonts/all.h>
 
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
 using esp_reset_reason_t = int;
 using esp_sleep_wakeup_cause_t = int;
 enum : int {
@@ -62,6 +62,13 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 
 #include <algorithm>
 #include <cstring>
+#ifdef KOBO_LINUX
+#include <KoboSuspendController.h>
+#include <KoboWebTransferService.h>
+#include <KoboWifiAutoConnect.h>
+#include <WiFi.h>
+#include <unistd.h>
+#endif
 
 #include "AppVersion.h"
 #include "CrossPointSettings.h"
@@ -69,6 +76,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "GlobalActions.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
+#include "OpdsCatalogStore.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
@@ -79,10 +87,16 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "activities/reader/ReadingStatsUtils.h"
 #include "activities/reader/StatsBackup.h"
 #include "activities/settings/KOReaderSettingsActivity.h"
+#include "network/OpdsSyncService.h"
+#include "platform/DeviceCapabilities.h"
+#ifndef KOBO_LINUX
 #include "activities/settings/SdFirmwareUpdateActivity.h"
+#endif
 #include "components/UITheme.h"
 #include "fontIds.h"
+#if !defined(KOBO_LINUX)
 #include "network/UsbSerialFileTransfer.h"
+#endif
 #ifdef SIMULATOR
 #include "simulator/SimulatorSmokeTest.h"
 #endif
@@ -245,6 +259,32 @@ EpdFont ui12BoldFont(&inter_12_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 #endif
 
+#ifdef KOBO_LINUX
+void applyKoboUiFontScale(GfxRenderer& target) {
+  const uint8_t scale = SETTINGS.koboUiScalePercent;
+  if (scale == 100) {
+    target.replaceFont(UI_10_FONT_ID, lexenddeca14FontFamily);
+    target.replaceFont(UI_12_FONT_ID, lexenddeca16FontFamily);
+    target.replaceFont(SMALL_FONT_ID, lexenddeca12FontFamily);
+  } else if (scale == 150) {
+    target.replaceFont(UI_10_FONT_ID, lexenddeca16FontFamily);
+    target.replaceFont(UI_12_FONT_ID, lexenddeca18FontFamily);
+    target.replaceFont(SMALL_FONT_ID, lexenddeca14FontFamily);
+  } else if (scale == 250) {
+    target.replaceFont(UI_10_FONT_ID, lexenddeca20FontFamily);
+    target.replaceFont(UI_12_FONT_ID, lexenddeca20FontFamily);
+    target.replaceFont(SMALL_FONT_ID, lexenddeca18FontFamily);
+  } else {  // Kobo default and invalid persisted values: 200%.
+    // Keep headings inside the compact header and tab bar.  The 200% setting
+    // already doubles the physical rows and targets; 16/18/14 is legible at
+    // 300 ppi without the title/tab overlap caused by the 20 px UI face.
+    target.replaceFont(UI_10_FONT_ID, lexenddeca16FontFamily);
+    target.replaceFont(UI_12_FONT_ID, lexenddeca18FontFamily);
+    target.replaceFont(SMALL_FONT_ID, lexenddeca14FontFamily);
+  }
+}
+#endif
+
 // measurement of power button press duration calibration value
 unsigned long t1 = 0;
 unsigned long t2 = 0;
@@ -354,16 +394,21 @@ enum class BootResume : uint8_t {
   QuickResume,  // wake from a quick-resume deep sleep (SD flag; survives power loss)
 };
 
-// Latched true once enterDeepSleep() commits to sleeping, before it tears down
-// the current activity. WiFi activities call silentRestart() in onExit() to
-// clear heap fragmentation on the way out, but deep sleep is a full chip reset
-// on wake and already clears the heap, so rebooting here would just power the
-// device back up against the user's sleep gesture. Never cleared:
-// startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
+// Latched while a suspend transition owns the activity stack. On ESP deep sleep
+// never returns; on Kobo Linux it must be cleared on the in-process resume.
 static bool deepSleepInProgress = false;
 
 void silentRestart() {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
+#ifdef KOBO_LINUX
+  // Linux owns no RTC_NOINIT equivalent. Persist a one-shot seamless route and
+  // re-exec in the same supervised process instead of performing an ESP reset.
+  APP_STATE.lastSleepFromReader = false;
+  APP_STATE.showBootScreen = false;
+  (void)APP_STATE.saveToFile();
+  LOG_DBG("MAIN", "Controlled Kobo re-exec (target=home)");
+  HalSystem::restart();
+#else
   silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=home)");
@@ -374,16 +419,25 @@ void silentRestart() {
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   delay(50);
   ESP.restart();
+#endif
 }
 
 void silentRestartToReader() {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
+#ifdef KOBO_LINUX
+  APP_STATE.lastSleepFromReader = !APP_STATE.openEpubPath.empty();
+  APP_STATE.showBootScreen = false;
+  (void)APP_STATE.saveToFile();
+  LOG_DBG("MAIN", "Controlled Kobo re-exec (target=reader)");
+  HalSystem::restart();
+#else
   silentRebootTarget = SILENT_REBOOT_TARGET_READER;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=reader)");
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   delay(50);
   ESP.restart();
+#endif
 }
 
 void waitForPowerRelease() {
@@ -586,14 +640,37 @@ void enterDeepSleep(bool fromTimeout) {
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
+#ifdef KOBO_LINUX
+  // Linux resumes from RAM, rather than rebooting as the ESP targets do.  The
+  // application deliberately execs after reopening DRM, but that is still a
+  // wake, not a cold boot: preserve the cover/progress sleep frame until the
+  // restored reader paints.  This applies to every Kobo sleep-screen mode,
+  // including the default Minimal Sleep cover.
+  APP_STATE.showBootScreen = false;
+#else
   APP_STATE.showBootScreen = !isQuickResumeSleep;
+#endif
 
   APP_STATE.saveToFile();
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
+#ifdef KOBO_LINUX
+  crossink::kobo::KoboSuspendController::recordEvent(
+      "preparing",
+      std::string("reader=") + (APP_STATE.lastSleepFromReader ? "1" : "0") + "; timeout=" + (fromTimeout ? "1" : "0"));
+#endif
   activityManager.goToSleep(fromTimeout);
+
+#ifdef KOBO_LINUX
+  // No OPDS request may hold the suspend transition hostage. The worker
+  // cooperatively cancels its active transfer and leaves queued work for wake.
+  OPDS_SYNC.prepareSuspend();
+  // This marker separates a renderer/EPDC stall from a kernel suspend issue.
+  // It is fsync'd by the controller and survives a forced power reset.
+  crossink::kobo::KoboSuspendController::recordEvent("screen_committed");
+#endif
 
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
@@ -601,7 +678,7 @@ void enterDeepSleep(bool fromTimeout) {
     delay(POST_SLEEP_SCREEN_SETTLE_MS);
   }
 
-  if (gpio.deviceIsX3() && SETTINGS.autoBackupStats != 0) {
+  if (crossink::platform::deviceCapabilities(gpio).hasRtc && SETTINGS.autoBackupStats != 0) {
     ReadingStatsDateTime now;
     if (getCurrentLocalReadingStatsDateTime(now) && !backupGlobalStats(false)) {
       LOG_ERR("MAIN", "Automatic reading-stats backup failed before deep sleep");
@@ -609,10 +686,54 @@ void enterDeepSleep(bool fromTimeout) {
   }
 
   putTiltSensorToSleepForDeepSleep();
+#ifdef KOBO_LINUX
+  // Keep the DRM/FBInk handles alive across suspend. Closing them here forced
+  // the old code to exec a fresh application on every wake, which looked like
+  // a reboot even though the kernel had merely resumed from RAM.
+  waitForPowerRelease();
+  delay(200);  // Do not let the sleep-button release become an immediate wake.
+  LOG_INF("SLP", "Kobo suspend prepare: reader=%d timeout=%d", APP_STATE.lastSleepFromReader ? 1 : 0,
+          fromTimeout ? 1 : 0);
+  // Preserve the association. Tearing wlan0 down before sleep made an
+  // otherwise successful wake look like a hang because SSH and the web UI
+  // could not return. The driver is put into powersave instead.
+  WiFi.setSleep(true);
+  crossink::kobo::KoboSuspendController::recordEvent("waiting_for_suspend", "wifi_powersave=1");
+  ::sync();
+  const unsigned long suspendStartedAt = millis();
+  const auto suspendResult = powerManager.startDeepSleep(gpio);
+  const unsigned long suspendElapsedMs = millis() - suspendStartedAt;
+  LOG_INF("SLP", "Kobo suspend returned after %lums (entered=%d wakeup_count=%d errno=%d detail=%s)", suspendElapsedMs,
+          suspendResult.entered ? 1 : 0, suspendResult.usedWakeupCount ? 1 : 0, suspendResult.errorNumber,
+          suspendResult.detail.c_str());
+  deepSleepInProgress = false;
+  OPDS_SYNC.resumeAfterSuspend();
+  WiFi.setSleep(false);
+  crossink::kobo::setWifiAutoConnectSuspended(false);
+  crossink::kobo::KoboSuspendController::recordEvent("resume_returned",
+                                                     "elapsed_ms=" + std::to_string(suspendElapsedMs));
+
+  // A return below two seconds is an unexpected wake, not a usable sleep.
+  // Stay in-process either way; the next user action remains responsive and
+  // the supervisor must never mistake a normal wake for an early app exit.
+  if (suspendElapsedMs < 2000UL) {
+    LOG_ERR("SLP", "Unexpected immediate Kobo wake (%lums)", suspendElapsedMs);
+  }
+
+  if (APP_STATE.lastSleepFromReader && !APP_STATE.openEpubPath.empty() &&
+      Storage.exists(APP_STATE.openEpubPath.c_str())) {
+    activityManager.goToReader(APP_STATE.openEpubPath, /*suppressBackRelease=*/true);
+  } else {
+    activityManager.goHome();
+  }
+  activityManager.requestUpdateAndWait();
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  return;
+#else
   display.deepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
-
-  powerManager.startDeepSleep(gpio);
+  (void)powerManager.startDeepSleep(gpio);
+#endif
 }
 
 void setupDisplayAndFonts(bool seamless = false) {
@@ -688,6 +809,9 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
+#ifdef KOBO_LINUX
+  applyKoboUiFontScale(renderer);
+#endif
 
   // Discover and load SD card fonts
   sdFontSystem.begin(renderer);
@@ -711,12 +835,12 @@ void setup() {
   // Web Serial sends file data in 256-byte chunks and waits for a 1-byte ACK.
   // HWCDC defaults to a 256-byte RX queue, which is fine for logs but too small
   // for chunked file transfer.
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(CROSSPOINT_POSIX)
   logSerial.setRxBufferSize(1024);
   logSerial.setTxBufferSize(1024);
 #endif
   Serial.begin(115200);
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(CROSSPOINT_POSIX)
   logSerial.setTxTimeoutMs(1);  // This is a load-bearing 1. Do not modify.
 #endif
 #endif
@@ -738,10 +862,10 @@ void setup() {
   halTiltSensor.begin();
   halClock.begin();
 
-  LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
-  LOG_INF("BOOT", "Post-GPIO diagnostic: device=%s usb=%d silentReboot=%d silentTarget=%lu",
-          gpio.deviceIsX3() ? "X3" : "X4", gpio.isUsbConnected() ? 1 : 0, isSilentReboot ? 1 : 0,
-          static_cast<unsigned long>(snapshotTarget));
+  const char* hardwareLabel = crossink::platform::deviceCapabilities(gpio).familyName();
+  LOG_INF("MAIN", "Hardware detect: %s", hardwareLabel);
+  LOG_INF("BOOT", "Post-GPIO diagnostic: device=%s usb=%d silentReboot=%d silentTarget=%lu", hardwareLabel,
+          gpio.isUsbConnected() ? 1 : 0, isSilentReboot ? 1 : 0, static_cast<unsigned long>(snapshotTarget));
 
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter
@@ -755,7 +879,7 @@ void setup() {
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(CROSSPOINT_POSIX)
   // FAT needs an application-provided timestamp callback. POSIX filesystems
   // already timestamp writes in the kernel and the simulator/Kobo storage
   // HAL intentionally does not expose this SdFat-only hook.
@@ -766,6 +890,13 @@ void setup() {
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
+  OPDS_CATALOG.loadFromFile();
+#ifdef KOBO_LINUX
+  // A saved Kobo network is product state, not an activity-local connection.
+  // Start reconnecting before Home/Reader paints so the web service and its
+  // header indicator become available after normal boots.
+  crossink::kobo::initializeWifiAutoConnect();
+#endif
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
@@ -838,6 +969,14 @@ void setup() {
       // us in a quick-resume-with-no-frame loop on the next boot.
       APP_STATE.showBootScreen = true;
       APP_STATE.saveToFile();
+#ifdef KOBO_LINUX
+      // Linux suspend resumes the same kernel, but the Kobo application is
+      // deliberately re-exec'd after the DRM device is reopened.  The panel
+      // still contains the cover/progress sleep screen.  Do not replace it
+      // with CrossInk's penguin boot splash while the reader is restoring.
+      // The normal route below paints the saved reader directly.
+      break;
+#else
       if (loadSleepFrameBuffer()) {
         // Frame restored: swap the sleep moon for the loading icon.
         const auto pageHeight = renderer.getScreenHeight();
@@ -852,16 +991,22 @@ void setup() {
         activityManager.goToBoot();  // frame file missing, fall back to the splash
       }
       break;
+#endif
     case BootResume::Splash:
       activityManager.goToBoot();
       break;
   }
 
+  bool routedRecoveryFirmware = false;
+#ifndef KOBO_LINUX
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
     activityManager.replaceActivity(
         std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInputManager, /*recoveryMode=*/true));
-  } else if (HalSystem::isRebootFromPanic()) {
+    routedRecoveryFirmware = true;
+  }
+#endif
+  if (!routedRecoveryFirmware && HalSystem::isRebootFromPanic()) {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
@@ -905,6 +1050,11 @@ void setup() {
 
   // Ensure we're not still holding the power button before leaving setup
   waitForPowerRelease();
+#ifdef KOBO_LINUX
+  // USB web transfer is a persisted Kobo feature, not an activity-owned ESP
+  // server. It remains reachable while the reader/home UI is in use.
+  crossink::kobo::reconcileWebTransfer();
+#endif
   allowSleepAt = millis() + 2000;
 }
 
@@ -914,17 +1064,32 @@ void loop() {
   static unsigned long lastMemPrint = 0;
 
   gpio.update();
+#ifdef KOBO_LINUX
+  if (crossink::kobo::serviceWifiAutoConnect()) {
+    // Repaint Home/Reader headers when WLAN comes up or drops, without
+    // forcing a page refresh while the state is unchanged.
+    activityManager.requestUpdate();
+  }
+  crossink::kobo::serviceWebTransfer();
+#endif
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.tiltPageTurnDirection, SETTINGS.orientation,
                        activityManager.isReaderActivity());
 
   renderer.setFadingFix(SETTINGS.fadingFix);
 
   if (Serial && millis() - lastMemPrint >= 10000) {
+#ifdef KOBO_LINUX
+    const auto memory = HalSystem::memoryInfo();
+    LOG_INF("MEM", "Available: %u bytes, Total: %u bytes, Min available: %u bytes, Max alloc estimate: %u bytes",
+            memory.availableBytes, memory.totalBytes, memory.minimumAvailableBytes, memory.maxAllocatableBytes);
+#else
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes", ESP.getFreeHeap(),
             ESP.getHeapSize(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap());
+#endif
     lastMemPrint = millis();
   }
 
+#if !defined(KOBO_LINUX)
   if (UsbSerialFileTransfer::process(activityManager.isHomeActivity()) ==
       UsbSerialFileTransfer::ProcessResult::ScreenshotRequested) {
     const uint32_t bufferSize = display.getBufferSize();
@@ -933,6 +1098,7 @@ void loop() {
     logSerial.write(buf, bufferSize);
     logSerial.printf("SCREENSHOT_END\n");
   }
+#endif
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();

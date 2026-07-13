@@ -127,11 +127,14 @@ void FontDownloadActivity::onEnter() {
 void FontDownloadActivity::onExit() {
   Activity::onExit();
 
+  // Only ESP needs to reclaim the Wi-Fi heap by restarting after a download.
+#ifndef KOBO_LINUX
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
     silentRestart();
   }
+#endif
 
   sdFontSystem.ensureLoaded(renderer);
 }

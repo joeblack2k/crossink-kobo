@@ -28,6 +28,7 @@ enum class SettingAction {
   ControlsFrontButtons,
   ControlsSideButtons,
   SystemDevice,
+  DeviceInfo,
   SystemFilesCache,
   SystemReadingStats,
   SystemGlobalStats,
@@ -276,4 +277,5 @@ class SettingsActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool requiresCleanRefreshOnEntry() const override { return true; }
 };

@@ -9,6 +9,8 @@
 #include "MappedInputManager.h"
 #include "activities/ActivityResult.h"
 #include "activities/home/FileBrowserActionActivity.h"
+#include "components/DirectListTouch.h"
+#include "components/TouchUiRegistry.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -20,6 +22,7 @@ constexpr int DETAIL_SIDE_MARGIN = 20;
 constexpr int DETAIL_BOTTOM_RESERVE = 55;
 constexpr int DETAIL_LINE_GAP = 6;
 constexpr unsigned long CLIPPING_DELETE_HOLD_MS = 1000;
+constexpr int KOBO_TOUCH_FRAME_HEIGHT = 96;
 
 bool isUtf8SpaceAt(const std::string& text, const size_t index, size_t& advance) {
   const auto c = static_cast<unsigned char>(text[index]);
@@ -148,7 +151,7 @@ int EpubReaderClippingListActivity::getPageItems() const {
   const bool isPortraitInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
   const int hintGutterHeight = isPortraitInverted ? 50 : 0;
   const int startY = LIST_START_Y + hintGutterHeight;
-  const int available = renderer.getScreenHeight() - startY - ROW_HEIGHT;
+  const int available = renderer.getScreenHeight() - startY - KOBO_TOUCH_FRAME_HEIGHT;
   return std::max(1, available / ROW_HEIGHT);
 }
 
@@ -285,6 +288,12 @@ void EpubReaderClippingListActivity::showClippingActionMenu(const bool ignoreIni
 }
 
 void EpubReaderClippingListActivity::loop() {
+  // Keep the list touch-native: a row tap opens its detail in the same frame
+  // rather than emulating the X4's focus-then-Select interaction.
+  if (!detailMode) {
+    consumeDirectListSelection(mappedInput, static_cast<int>(clippings.size()), selectedIndex);
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (detailMode) {
       closeDetail();
@@ -472,6 +481,10 @@ void EpubReaderClippingListActivity::render(RenderLock&&) {
     if (isSelected) {
       renderer.fillRect(contentX, rowY, contentWidth - 1, ROW_HEIGHT, true);
     }
+
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerItem(contentX, rowY, contentWidth, ROW_HEIGHT, selectedIndex, itemIndex, total);
+#endif
 
     const Clipping& clipping = clippings[itemIndex];
     buildOneLineSnippetText(clipping.text, snippetText);

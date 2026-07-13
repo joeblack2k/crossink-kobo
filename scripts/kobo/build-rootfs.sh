@@ -48,6 +48,8 @@ do
 		exit 1
 	}
 done
+"$repo_dir/scripts/kobo/apply-vendor-patches.sh"
+python3 "$repo_dir/scripts/build_web.py"
 [ -f "$key_file" ] || {
 	echo "Missing dedicated SSH public key: $key_file" >&2
 	exit 1
@@ -89,9 +91,8 @@ if [ "$(uname -s)" = Darwin ]; then
 			HOST_CFLAGS="$host_cflags" HOST_LDFLAGS="$host_ldflags" "$@"
 	}
 else
-	# Buildroot supplies Linux host RPATH/link flags itself.  Passing an empty
-	# HOST_LDFLAGS from this wrapper strips `-L$(HOST_DIR)/lib` and makes host
-	# MPFR/GMP (and later tools) fail to link.
+	# Buildroot supplies Linux host RPATH/link flags itself. Passing an empty
+	# HOST_LDFLAGS strips -L$(HOST_DIR)/lib and makes host tools fail to link.
 	buildroot_make() {
 		make -C "$buildroot_dir" BR2_EXTERNAL="$external_dir" O="$output_dir" "$@"
 	}
@@ -100,5 +101,16 @@ fi
 buildroot_make crossink_kobo_glo_hd_defconfig
 if [ "${CROSSINK_LINUX_RECONFIGURE:-0}" = 1 ]; then
 	buildroot_make linux-reconfigure
+fi
+# Buildroot local packages are not content-addressed.  Do not invoke a
+# *-rebuild target here: when the output directory is fresh, that target
+# bypasses dependency resolution and CMake can run before libdrm exists in the
+# staging sysroot.  Remove only the changed local package directories, then
+# let the normal top-level build resolve every dependency in order.
+if [ "${CROSSINK_FORCE_APP_REBUILD:-0}" = 1 ]; then
+	buildroot_make crossink-kobo-app-dirclean
+fi
+if [ "${CROSSINK_FORCE_PLATFORM_REBUILD:-0}" = 1 ]; then
+	buildroot_make crossink-kobo-platform-dirclean
 fi
 buildroot_make "-j${JOBS:-6}"

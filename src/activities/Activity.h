@@ -47,6 +47,10 @@ class Activity {
 
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
+  // Full-screen Kobo activities can ask for one GC16 clean-up when they are
+  // entered. Keeping this opt-in prevents normal reader page turns from
+  // becoming slow full refreshes.
+  virtual bool requiresCleanRefreshOnEntry() const { return false; }
   virtual bool isReaderActivity() const { return false; }
   virtual bool allowPowerAsConfirmInReaderMode() const { return false; }
   virtual bool canSnapshotForSleepOverlay() const { return false; }

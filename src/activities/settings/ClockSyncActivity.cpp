@@ -33,11 +33,14 @@ void ClockSyncActivity::onEnter() {
 void ClockSyncActivity::onExit() {
   Activity::onExit();
 
+  // A Kobo connection is a device service, not a one-activity resource.
+#ifndef KOBO_LINUX
   if (shouldTearDownWifiOnExit && WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
     WiFi.mode(WIFI_OFF);
   }
+#endif
 }
 
 void ClockSyncActivity::launchWifiSelection() {

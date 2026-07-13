@@ -14,6 +14,7 @@
 #include "FileBrowserActionActivity.h"
 #include "MappedInputManager.h"
 #include "components/CompactHeader.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -89,6 +90,8 @@ void SavedItemsHomeActivity::loop() {
     onGoHome();
     return;
   }
+
+  consumeDirectListSelection(mappedInput, static_cast<int>(books.size()), selectedIndex);
 
   if (!books.empty() && !longPressOpenHandled && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
       mappedInput.getHeldTime() >= SAVED_ITEM_DELETE_HOLD_MS) {

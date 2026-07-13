@@ -353,6 +353,9 @@ void ChapterHtmlSlimParser::markCurrentPageFromCurrentElement() {
 }
 
 void ChapterHtmlSlimParser::completeCurrentPage() {
+  if (currentPage) {
+    currentPage->fitSingleImageToViewport(viewportWidth, viewportHeight);
+  }
   completePageFn(std::move(currentPage), currentPageParagraphIndex, currentPageListItemIndex);
 }
 

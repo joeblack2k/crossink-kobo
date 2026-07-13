@@ -9,6 +9,7 @@
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -32,6 +33,8 @@ void KOReaderSettingsActivity::loop() {
     finishAfterBackPress();
     return;
   }
+
+  consumeDirectListSelection(mappedInput, MENU_ITEMS, selectedIndex);
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     handleSelection();

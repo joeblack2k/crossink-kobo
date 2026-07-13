@@ -7,12 +7,13 @@
 namespace crossink::kobo {
 
 enum class TouchContext : std::uint8_t { Navigation, Reader, Dialog, Keyboard };
-enum class TouchAction : std::uint8_t { None, Back, Confirm, Left, Right, Up, Down, PageBack, PageForward };
+enum class TouchAction : std::uint8_t { None, UiItem, Back, Confirm, Left, Right, Up, Down, PageBack, PageForward };
 
 struct TouchDispatch {
   TouchAction action = TouchAction::None;
   bool press = false;
   bool release = false;
+  TouchPoint point{};
 };
 
 class KoboTouchGesture {

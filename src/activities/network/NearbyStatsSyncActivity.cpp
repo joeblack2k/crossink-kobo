@@ -1,6 +1,6 @@
 #include "NearbyStatsSyncActivity.h"
 
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
 
 #include <GfxRenderer.h>
 #include <I18n.h>
@@ -32,7 +32,13 @@ void NearbyStatsSyncActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_NEARBY_STATS_SYNC));
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_NEARBY_STATS_SIMULATOR_UNAVAILABLE), true,
+  const StrId unavailable =
+#ifdef KOBO_LINUX
+      StrId::STR_NEARBY_STATS_KOBO_UNAVAILABLE;
+#else
+      StrId::STR_NEARBY_STATS_SIMULATOR_UNAVAILABLE;
+#endif
+  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, I18N.get(unavailable), true,
                             EpdFontFamily::BOLD);
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

@@ -14,6 +14,10 @@ class ImageBlock final : public Block {
   const std::string& getImagePath() const { return imagePath; }
   int16_t getWidth() const { return width; }
   int16_t getHeight() const { return height; }
+  void setDisplaySize(const int16_t newWidth, const int16_t newHeight) {
+    width = newWidth;
+    height = newHeight;
+  }
 
   bool imageExists() const;
 

@@ -4,6 +4,8 @@
 #include <Logging.h>
 #include <Serialization.h>
 
+#include "Epub/converters/ImageDecoderFactory.h"
+
 namespace {
 
 constexpr uint16_t MAX_PAGE_ELEMENTS = 1024;
@@ -362,6 +364,49 @@ void Page::renderText(GfxRenderer& renderer, const int fontId, const int xOffset
 void Page::renderImages(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) const {
   renderFilteredPageElements(elements, renderer, fontId, xOffset, yOffset, true,
                              [](const PageElement& element) { return element.getTag() == TAG_PageImage; });
+}
+
+bool Page::fitSingleImageToViewport(const uint16_t viewportWidth, const uint16_t viewportHeight) {
+  if (viewportWidth == 0 || viewportHeight == 0 || elements.size() != 1 ||
+      elements.front()->getTag() != TAG_PageImage) {
+    return false;
+  }
+
+  auto& pageImage = static_cast<PageImage&>(*elements.front());
+  auto& image = pageImage.getImageBlock();
+  ImageDimensions source{image.getWidth(), image.getHeight()};
+  if (auto* decoder = ImageDecoderFactory::getDecoder(image.getImagePath())) {
+    ImageDimensions decoded{};
+    if (decoder->getDimensions(image.getImagePath(), decoded) && decoded.width > 0 && decoded.height > 0) {
+      source = decoded;
+    }
+  }
+  if (source.width <= 0 || source.height <= 0) {
+    LOG_ERR("PGE", "Single-image page has invalid source dimensions: %dx%d", source.width, source.height);
+    return false;
+  }
+
+  // `min` is intentional: preserve aspect ratio, use all available page area
+  // possible, and never crop or stretch.  Unlike inline images this may
+  // upscale a small plate because a physical book dedicates the full leaf to
+  // the image as well.
+  const float scaleX = static_cast<float>(viewportWidth) / source.width;
+  const float scaleY = static_cast<float>(viewportHeight) / source.height;
+  const float scale = std::min(scaleX, scaleY);
+  const int width = std::max(1, static_cast<int>(source.width * scale + 0.5f));
+  const int height = std::max(1, static_cast<int>(source.height * scale + 0.5f));
+  if (width > INT16_MAX || height > INT16_MAX) {
+    LOG_ERR("PGE", "Single-image page exceeds serializable dimensions: %dx%d", width, height);
+    return false;
+  }
+
+  image.setDisplaySize(static_cast<int16_t>(width), static_cast<int16_t>(height));
+  pageImage.xPos = static_cast<int16_t>((viewportWidth - width) / 2);
+  pageImage.yPos = static_cast<int16_t>((viewportHeight - height) / 2);
+  LOG_DBG("PGE", "Full-page image %s source=%dx%d viewport=%ux%u target=(%d,%d %dx%d)",
+          image.getImagePath().c_str(), source.width, source.height, viewportWidth, viewportHeight, pageImage.xPos,
+          pageImage.yPos, width, height);
+  return true;
 }
 
 bool Page::serialize(FsFile& file) const {

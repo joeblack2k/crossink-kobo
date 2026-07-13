@@ -9,19 +9,25 @@
 
 #include "MappedInputManager.h"
 #include "activities/home/FileBrowserActionActivity.h"
+#include "components/DirectListTouch.h"
+#include "components/TouchUiRegistry.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 static constexpr int ROW_HEIGHT = 68;
 static constexpr int LIST_START_Y = 60;
 static constexpr unsigned long BOOKMARK_DELETE_HOLD_MS = 1000;
+static constexpr int KOBO_TOUCH_FRAME_HEIGHT = 96;
 
 int EpubReaderBookmarkListActivity::getPageItems() const {
   const auto orientation = renderer.getOrientation();
   const bool isPortraitInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
   const int hintGutterHeight = isPortraitInverted ? 50 : 0;
   const int startY = LIST_START_Y + hintGutterHeight;
-  const int available = renderer.getScreenHeight() - startY - ROW_HEIGHT;
+  // The bottom 96px is the global Back/Select frame on Kobo, never list
+  // content.  Reserving it also keeps a row tap from being interpreted as a
+  // footer gesture at every orientation.
+  const int available = renderer.getScreenHeight() - startY - KOBO_TOUCH_FRAME_HEIGHT;
   return std::max(1, available / ROW_HEIGHT);
 }
 
@@ -85,6 +91,8 @@ void EpubReaderBookmarkListActivity::showBookmarkActionMenu(bool ignoreInitialCo
 }
 
 void EpubReaderBookmarkListActivity::loop() {
+  consumeDirectListSelection(mappedInput, static_cast<int>(bookmarks.size()), selectedIndex);
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     ActivityResult result;
     result.isCancelled = true;
@@ -180,6 +188,10 @@ void EpubReaderBookmarkListActivity::render(RenderLock&&) {
     if (isSelected) {
       renderer.fillRect(contentX, rowY, contentWidth - 1, ROW_HEIGHT, true);
     }
+
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerItem(contentX, rowY, contentWidth, ROW_HEIGHT, selectedIndex, itemIndex, total);
+#endif
 
     const Bookmark& bm = bookmarks[itemIndex];
     const char* chapter = (bm.chapterTitle[0] != '\0') ? bm.chapterTitle : tr(STR_UNKNOWN_CHAPTER);

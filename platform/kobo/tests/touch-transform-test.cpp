@@ -45,5 +45,11 @@ int main() {
   KoboTouchTransform nativeLandscape({{0, 1447}, {0, 1071}, true, false, false});
   expect(nativeLandscape.map(0, 0), {0, 0}, "native landscape minimum");
   expect(nativeLandscape.map(1447, 1071), {1071, 1447}, "native landscape maximum");
+
+  KoboTouchTransform n437({{0, 1447}, {0, 1071}, true, true, false});
+  expect(n437.map(0, 1071), {0, 0}, "N437 portrait top-left");
+  expect(n437.map(0, 0), {1071, 0}, "N437 portrait top-right");
+  expect(n437.map(1447, 1071), {0, 1447}, "N437 portrait bottom-left");
+  expect(n437.map(1447, 0), {1071, 1447}, "N437 portrait bottom-right");
   return EXIT_SUCCESS;
 }

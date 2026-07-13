@@ -16,6 +16,7 @@
 #include "activities/settings/StatusBarSettingsActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "activities/util/OptionSelectionActivity.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -373,6 +374,8 @@ void ReaderOptionsActivity::openLineHeightPicker() {
 
 void ReaderOptionsActivity::loop() {
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+
+  consumeDirectListSelection(mappedInput, settingsCount, selectedIndex);
 
   buttonNavigator.onNextRelease([this] {
     moveSelection(true);

@@ -1,5 +1,4 @@
 #include "KoboEvdevTouch.h"
-#include "KoboEvdevAbi.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -11,6 +10,8 @@
 #include <cerrno>
 #include <climits>
 #include <cstring>
+
+#include "KoboEvdevAbi.h"
 
 namespace crossink::kobo {
 namespace {
@@ -115,8 +116,8 @@ bool KoboEvdevTouch::open(const TouchDeviceInfo& device, TouchCalibration calibr
     return false;
   }
   device_ = device;
-  const bool useDeviceCalibration = calibration.x.maximum <= calibration.x.minimum &&
-                                    calibration.y.maximum <= calibration.y.minimum;
+  const bool useDeviceCalibration =
+      calibration.x.maximum <= calibration.x.minimum && calibration.y.maximum <= calibration.y.minimum;
   if (calibration.x.maximum <= calibration.x.minimum) {
     calibration.x = device.x;
   }
@@ -131,6 +132,9 @@ bool KoboEvdevTouch::open(const TouchDeviceInfo& device, TouchCalibration calibr
   if (useDeviceCalibration && xSpan == KoboTouchTransform::kPortraitHeight &&
       ySpan == KoboTouchTransform::kPortraitWidth) {
     calibration.swapAxes = true;
+    // N437's native landscape zForce origin is at the portrait top-right.
+    // After swapping native axes, portrait X must therefore be mirrored.
+    calibration.invertX = true;
   }
   transform_ = KoboTouchTransform(calibration);
   rawX_ = calibration.x.minimum;
@@ -182,6 +186,7 @@ bool KoboEvdevTouch::readFrame(TouchFrame& frame) {
       down_ = event.value != 0;
     } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
       frame.point = transform_.map(rawX_, rawY_);
+      frame.rawPoint = {rawX_, rawY_};
       frame.down = down_;
       frame.positionChanged = positionChanged_;
       timespec now{};

@@ -10,13 +10,14 @@
 #include "CrossPointSettings.h"
 #include "components/themes/BaseTheme.h"
 #include "fontIds.h"
+#include "platform/DeviceCapabilities.h"
 
 namespace {
 constexpr int kHeaderDateRightInset = 12;
 constexpr int kHeaderDateBottomGap = 10;
 
 bool formatHeaderDate(char* buf, const size_t len) {
-  if (!gpio.deviceIsX3()) return false;
+  if (!crossink::platform::deviceCapabilities(gpio).hasRtc) return false;
   if (!SETTINGS.clockDateHasBeenSynced) return false;
   return halClock.formatDate(buf, len, SETTINGS.clockUtcOffsetQ);
 }

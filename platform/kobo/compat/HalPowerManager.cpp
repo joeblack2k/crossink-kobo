@@ -15,7 +15,9 @@ void HalPowerManager::setPowerSaving(bool /*enabled*/) {
   // meaningful low-power boundary on N437 and is handled separately.
 }
 
-void HalPowerManager::startDeepSleep(HalGPIO& input) const { input.startDeepSleep(); }
+crossink::kobo::KoboSuspendResult HalPowerManager::startDeepSleep(HalGPIO& input) const {
+  return input.startDeepSleep();
+}
 
 std::uint16_t HalPowerManager::getBatteryPercentage() const {
   crossink::kobo::BatterySnapshot snapshot;

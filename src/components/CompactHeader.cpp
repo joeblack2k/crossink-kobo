@@ -10,12 +10,14 @@
 #include "fontIds.h"
 
 namespace {
-constexpr int kHeaderHeight = 67;
 constexpr int kHeaderTopGap = 6;
 constexpr int kHeaderTitleLift = 5;
 constexpr int kHeaderBaselineLift = 2;
 
-int visibleHeaderHeight(const ThemeMetrics& metrics) { return std::min(metrics.headerHeight, kHeaderHeight); }
+// ThemeMetrics already reflects the active Kobo UI scale.  Capping it at the
+// old X4 compact-header height made the 200% status bar taller than the whole
+// header, which is why titles rendered through the divider line.
+int visibleHeaderHeight(const ThemeMetrics& metrics) { return metrics.headerHeight; }
 
 int titleBaselineY(const GfxRenderer& renderer, const ThemeMetrics& metrics) {
   const int availableH = visibleHeaderHeight(metrics) - metrics.batteryBarHeight;
@@ -31,12 +33,12 @@ int headerBottomY(const ThemeMetrics& metrics) { return metrics.topPadding + vis
 
 int contentTop(const ThemeMetrics& metrics) { return headerBottomY(metrics) + kHeaderTopGap; }
 
-void drawTitle(const GfxRenderer& renderer, const char* title, const bool showDate) {
+void drawTitle(const GfxRenderer& renderer, const char* title, const bool showDate, const int leftInset) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, visibleHeaderHeight(metrics)}, "");
 
-  const int titleX = metrics.contentSidePadding;
+  const int titleX = metrics.contentSidePadding + std::max(0, leftInset);
   const int batteryStartX = pageWidth - metrics.contentSidePadding - metrics.batteryWidth;
   const int dateStartX = showDate ? pageWidth - headerDateReservedWidth(renderer) : pageWidth;
   const int titleRightX = std::min(batteryStartX, dateStartX) - metrics.contentSidePadding;

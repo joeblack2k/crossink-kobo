@@ -3,6 +3,7 @@
 #include <HalGPIO.h>
 
 #include <array>
+#include <cstdint>
 
 class MappedInputManager {
  public:
@@ -43,11 +44,27 @@ class MappedInputManager {
   bool isFrontButtonPressed(uint8_t buttonIndex) const;
 
 #if defined(SIMULATOR) || defined(KOBO_LINUX)
+  struct TouchTarget {
+    unsigned char kind = 0;
+    int primary = 0;
+    int secondary = 0;
+    std::uint32_t generation = 0;
+    int x = -1;
+    int y = -1;
+  };
+
   // Platform touch/keyboard adapters inject logical actions here; activities
   // remain independent of evdev, SDL and raw hardware button numbers.
   void injectPress(Button button);
   void injectRelease(Button button);
   void clearInjectedInputFrame();
+  void injectTouchTarget(unsigned char kind, int primary, int secondary, std::uint32_t generation, int x = -1,
+                         int y = -1);
+  bool consumeTouchTarget(TouchTarget& target);
+  // A list row published by TouchUiRegistry.  Kobo activities consume this
+  // directly instead of replaying X4-style Up/Down presses one frame at a
+  // time.  `currentIndex` is retained only for the temporary legacy fallback.
+  bool consumeNavigationTouchTarget(int& targetIndex, int& currentIndex);
 #endif
 #ifdef SIMULATOR
   void simulatorInjectPress(Button button) { injectPress(button); }
@@ -68,6 +85,8 @@ class MappedInputManager {
   std::array<bool, BUTTON_COUNT> injectedReleased{};
   std::array<bool, BUTTON_COUNT> injectedHeld{};
   std::array<unsigned long, BUTTON_COUNT> injectedPressStart{};
+  TouchTarget injectedTouchTarget{};
+  bool injectedTouchTargetAvailable = false;
 #endif
 
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;

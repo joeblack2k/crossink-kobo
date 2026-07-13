@@ -19,6 +19,8 @@ class ContentOpfParser final : public Print {
     IN_BOOK_TITLE,
     IN_BOOK_AUTHOR,
     IN_BOOK_LANGUAGE,
+    IN_BOOK_SERIES,
+    IN_BOOK_COLLECTION,
     IN_MANIFEST,
     IN_SPINE,
     IN_GUIDE,
@@ -73,6 +75,12 @@ class ContentOpfParser final : public Print {
   std::string title;
   std::string author;
   std::string language;
+  // Calibre EPUB2 `meta name=calibre:series` and EPUB3
+  // `meta property=belongs-to-collection` are both retained.  They feed the
+  // Kobo library's real Series/Collections views rather than a decorative tab.
+  std::string series;
+  std::string seriesIndex;
+  std::string collection;
   std::string tocNcxPath;
   std::string tocNavPath;  // EPUB 3 nav document path
   std::string coverItemHref;

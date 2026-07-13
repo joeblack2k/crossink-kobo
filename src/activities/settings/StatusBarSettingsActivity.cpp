@@ -12,6 +12,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -224,6 +225,8 @@ void StatusBarSettingsActivity::loop() {
     finishAfterBackPress();
     return;
   }
+
+  consumeDirectListSelection(mappedInput, visibleItemCount, selectedIndex);
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     handleSelection();

@@ -14,6 +14,10 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "platform/DeviceCapabilities.h"
+#ifdef KOBO_LINUX
+#include <KoboRefreshQualification.h>
+#endif
 #include "KOReaderCredentialStore.h"
 #include "activities/settings/SettingsActivity.h"
 
@@ -298,6 +302,34 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
 #ifdef KOBO_LINUX
     add(SettingInfo::Value(StrId::STR_FRONTLIGHT, &CrossPointSettings::frontlightBrightness, {0, 100, 5},
                            "frontlightBrightness", StrId::STR_CAT_DISPLAY));
+    {
+      SettingInfo scale;
+      scale.nameId = StrId::STR_UI_SCALE;
+      scale.type = SettingType::ENUM;
+      scale.valuePtr = &CrossPointSettings::koboUiScalePercent;
+      scale.enumStringValues = {"100%", "150%", "200%", "250%"};
+      scale.enumRawValues = {100, 150, 200, 250};
+      scale.key = "koboUiScalePercent";
+      scale.category = StrId::STR_CAT_DISPLAY;
+      add(std::move(scale));
+    }
+    {
+      SettingInfo refreshProfile;
+      refreshProfile.nameId = StrId::STR_DISPLAY_REFRESH;
+      refreshProfile.type = SettingType::ENUM;
+      refreshProfile.valuePtr = &CrossPointSettings::koboRefreshProfile;
+      refreshProfile.enumStringValues = {"Safe"};
+      refreshProfile.enumRawValues = {CrossPointSettings::KOBO_REFRESH_SAFE};
+      if (crossink::kobo::koboFastRefreshQualified()) {
+        refreshProfile.enumStringValues.emplace_back("Fast");
+        refreshProfile.enumRawValues.emplace_back(CrossPointSettings::KOBO_REFRESH_FAST);
+      }
+      refreshProfile.key = "koboRefreshProfile";
+      refreshProfile.category = StrId::STR_CAT_DISPLAY;
+      add(std::move(refreshProfile));
+    }
+    add(SettingInfo::Toggle(StrId::STR_WEB_TRANSFER, &CrossPointSettings::koboWebTransferEnabled,
+                            "koboWebTransferEnabled", StrId::STR_CAT_DISPLAY));
 #endif
     add(SettingInfo::Enum(
             StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
@@ -702,7 +734,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
       *fontSizeIt = buildFontSizeSetting(registry);
     }
   }
-  if (!gpio.deviceIsX3()) {
+  if (!crossink::platform::deviceCapabilities(gpio).hasRtc) {
     auto sleepScreenIt =
         std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_SLEEP_SCREEN; });
     if (sleepScreenIt != v.end()) {
@@ -849,9 +881,13 @@ inline std::vector<SettingInfo> buildControlsPowerSettingsList(const std::vector
 inline std::vector<SettingInfo> buildControlsFrontButtonSettingsList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> settings;
   settings.reserve(6);
+#ifndef KOBO_LINUX
+  // The Glo HD has no X4-style remappable hardware navigation cluster.  Its
+  // persistent navigation controls are touch targets owned by the Kobo UI.
   settings.push_back(SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
   settings.push_back(
       SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS_READER, SettingAction::RemapFrontButtonsReader));
+#endif
   addSettingByKey(settings, allSettings, "frontButtonOrientationAware");
   addSettingByName(settings, allSettings, StrId::STR_LONG_PRESS_BEHAVIOR);
   addSettingByName(settings, allSettings, StrId::STR_LONG_PRESS_BACK_ACTION);
@@ -881,13 +917,22 @@ inline std::vector<SettingInfo> buildGroupedDisplaySettingsList(const std::vecto
   };
 
   displaySettings.push_back(SettingInfo::Submenu(StrId::STR_DISPLAY_SLEEP_SCREEN, SettingAction::DisplaySleepScreen));
+  // Connectivity must be discoverable from the default Settings tab on a
+  // touch-only Kobo; keeping it only in the fourth tab made Wi-Fi appear to
+  // be absent even though the selection activity existed.
+  addDisplaySetting(StrId::STR_WIFI_NETWORKS);
+#ifdef KOBO_LINUX
+  addDisplaySetting(StrId::STR_WEB_TRANSFER);
+#endif
   addDisplaySetting(StrId::STR_HIDE_BATTERY);
   if (halClock.isAvailable()) {
     addDisplaySetting(StrId::STR_HIDE_CLOCK);
   }
   addDisplaySetting(StrId::STR_REFRESH_FREQ);
 #ifdef KOBO_LINUX
+  addDisplaySetting(StrId::STR_DISPLAY_REFRESH);
   addDisplaySetting(StrId::STR_FRONTLIGHT);
+  addDisplaySetting(StrId::STR_UI_SCALE);
 #endif
   addDisplaySetting(StrId::STR_UI_THEME);
   addDisplaySetting(StrId::STR_RECENT_BOOKS_VIEW);
@@ -926,14 +971,24 @@ inline std::vector<SettingInfo> buildSystemSettingsParentList(const std::vector<
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
+#ifndef KOBO_LINUX
+  // These two routes install ESP firmware partitions.  Kobo uses a separate,
+  // signed application-release updater that is not implemented yet, so never
+  // expose a menu item that cannot perform a safe Kobo update.
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
+#endif
   return systemSettings;
 }
 
 inline std::vector<SettingInfo> buildSystemDeviceSettingsList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> settings;
-  settings.reserve(7);
+  settings.reserve(8);
+#ifdef KOBO_LINUX
+  // Kobo has meaningful hardware and network state that should not be
+  // conflated with the editable device name below.
+  settings.push_back(SettingInfo::Action(StrId::STR_SYSTEM_DEVICE, SettingAction::DeviceInfo));
+#endif
   addSettingByName(settings, allSettings, StrId::STR_DEVICE_NAME);
   addSettingByName(settings, allSettings, StrId::STR_TIME_TO_SLEEP);
   settings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));

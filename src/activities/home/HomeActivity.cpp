@@ -34,6 +34,9 @@
 #include "RecentBooksStore.h"
 #include "SavedItemsHomeActivity.h"
 #include "components/UITheme.h"
+#ifdef KOBO_LINUX
+#include "components/TouchUiRegistry.h"
+#endif
 #include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/minimal/MinimalTheme.h"
@@ -254,7 +257,7 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
   items.push({tr(STR_MENU_RECENT_BOOKS), Recent, HomeMenuAction::RecentBooks});
 
   if (hasOpdsServers) {
-    items.push({tr(STR_OPDS_BROWSER), Library, HomeMenuAction::OpdsBrowser});
+    items.push({"Library", Library, HomeMenuAction::OpdsBrowser});
   }
   if (hasReadingStats) {
     items.push({tr(STR_READING_STATS), Chart, HomeMenuAction::ReadingStats});
@@ -264,7 +267,6 @@ void appendHomeMenuItems(HomeMenuEntries& items, bool hasOpdsServers, bool hasRe
   }
 
   items.push({tr(STR_FILE_TRANSFER), Transfer, HomeMenuAction::FileTransfer});
-  items.push({tr(STR_SETTINGS_TITLE), Settings, HomeMenuAction::Settings});
 }
 
 HomeMenuEntries buildHomeMenuItems(bool hasOpdsServers, bool hasReadingStats, bool hasBookmarks, bool hasClippings) {
@@ -278,7 +280,7 @@ HomeMenuEntries buildMinimalMenuItems(bool hasOpdsServers, bool hasReadingStats,
   items.push({tr(STR_MENU_RECENT_BOOKS), Recent, HomeMenuAction::RecentBooks});
 
   if (hasOpdsServers) {
-    items.push({tr(STR_OPDS_BROWSER), Library, HomeMenuAction::OpdsBrowser});
+    items.push({"Library", Library, HomeMenuAction::OpdsBrowser});
   }
   if (hasBookmarks || hasClippings) {
     items.push({savedItemsLabel(hasBookmarks, hasClippings), BookmarkIcon, HomeMenuAction::Bookmarks});
@@ -336,7 +338,16 @@ bool isDashboardTheme() {
   return static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::DASHBOARD;
 }
 
-bool usesMinimalHomeInteraction() { return isMinimalTheme() || isDashboardTheme(); }
+bool usesMinimalHomeInteraction() {
+#ifdef KOBO_LINUX
+  // The compact X4 home maps four physical front buttons directly to four
+  // actions. Kobo has no such front-button cluster: use the normal selectable
+  // activity path so touch always flows through logical MappedInput actions.
+  return false;
+#else
+  return isMinimalTheme() || isDashboardTheme();
+#endif
+}
 
 bool isAnyFrontButtonPressed(const MappedInputManager& mappedInput) {
   return mappedInput.isFrontButtonPressed(HalGPIO::BTN_BACK) ||
@@ -345,6 +356,12 @@ bool isAnyFrontButtonPressed(const MappedInputManager& mappedInput) {
 }
 
 int minimalHomeNavCount(const bool hasCurrentBook) { return hasCurrentBook ? 4 : 3; }
+
+#ifdef KOBO_LINUX
+// This is a direct card action, not a list index.  Keep it outside the menu
+// index domain so Home can never reinterpret a book-card tap as Browse Files.
+constexpr int kCurrentBookTouchTarget = -1;
+#endif
 
 int minimalHomeCoverWidth(int coverHeight) {
   (void)coverHeight;
@@ -579,7 +596,7 @@ static_assert(HomeActivity::kMaxCachedBooks >= LyraCarouselMetrics::values.homeR
 
 int HomeActivity::getMenuItemCount() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  int count = 4;  // File Browser, Recents, File transfer, Settings
+  int count = 3;  // File Browser, Recents, File transfer; Settings has a fixed Kobo touch-frame slot.
   if (!metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
     count += getVisibleRecentBookCount();
   } else if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
@@ -1397,6 +1414,38 @@ bool HomeActivity::preRenderCarouselFrames(bool showProgressPopup) {
 }
 
 void HomeActivity::loop() {
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  int directHomeItem = 0;
+  int ignoredCurrent = 0;
+  if (mappedInput.consumeNavigationTouchTarget(directHomeItem, ignoredCurrent)) {
+#ifdef KOBO_LINUX
+    // The always-visible left half of the 96 px touch frame. Its synthetic
+    // list index intentionally follows the real menu entries, so the input
+    // path stays direct-touch rather than replaying X4-style Up presses.
+    if (directHomeItem == getMenuItemCount()) {
+      onSettingsOpen();
+      return;
+    }
+#endif
+    if (directHomeItem < 0 || directHomeItem >= getMenuItemCount()) {
+      return;
+    }
+    // Button menus publish an index relative to the menu.  Home's selection
+    // additionally contains the visible recent-book cards, so using the raw
+    // menu index reopened book zero when the user tapped Browse Files.
+    selectorIndex = getHomeMenuSelectionOffset(recentBooks) + directHomeItem;
+    mappedInput.injectRelease(MappedInputManager::Button::Confirm);
+  }
+#ifdef KOBO_LINUX
+  MappedInputManager::TouchTarget directTarget;
+  if (mappedInput.consumeTouchTarget(directTarget) &&
+      directTarget.kind == static_cast<unsigned char>(TouchUiRegistry::TargetKind::Tab) &&
+      directTarget.primary == kCurrentBookTouchTarget) {
+    openCurrentBookFromTouch();
+    return;
+  }
+#endif
+#endif
   if (usesMinimalHomeInteraction()) {
     const int pressedFrontButton = mappedInput.getPressedFrontButton();
     const int releasedFrontButton = mappedInput.getReleasedFrontButton();
@@ -1705,6 +1754,7 @@ void HomeActivity::render(RenderLock&&) {
                             std::bind(&HomeActivity::storeCoverBuffer, this),
                             hasAnyBookStats(currentBookStats) ? &currentBookStats : nullptr, currentBookProgressPercent,
                             &globalStats, currentBookChapterTitle.c_str());
+    registerCurrentBookTouchTarget();
 
     const int homeNavCount = minimalHomeNavCount(!recentBooks.empty());
     if (minimalHomeNavIndex >= homeNavCount) {
@@ -1753,6 +1803,11 @@ void HomeActivity::render(RenderLock&&) {
       GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding}, nullptr);
       GUI.drawCarouselBorder(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
                              recentBooks, centerIdx, inCarouselRow);
+      coverRectX = 0;
+      coverRectY = metrics.homeTopPadding;
+      coverRectW = pageWidth;
+      coverRectH = metrics.homeCoverTileHeight;
+      registerCurrentBookTouchTarget();
       if (!inCarouselRow) {
         const auto menuItems = buildHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings);
         if (static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) ==
@@ -1798,6 +1853,7 @@ void HomeActivity::render(RenderLock&&) {
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this),
                           hasAnyBookStats(currentBookStats) ? &currentBookStats : nullptr, currentBookProgressPercent);
+  registerCurrentBookTouchTarget();
 
   auto menuItems = buildSelectableHomeMenuItems(hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings,
                                                 metrics.homeContinueReadingInMenu && !recentBooks.empty());
@@ -1812,11 +1868,20 @@ void HomeActivity::render(RenderLock&&) {
       [&menuItems](int index) { return menuItems[index].label; },
       [&menuItems](int index) { return menuItems[index].icon; });
 
+#ifdef KOBO_LINUX
+  // Home has direct row taps; use its permanent frame for the two actions a
+  // touch user needs most. This keeps Settings visible at every scale.
+  GUI.drawButtonHints(renderer, tr(STR_SETTINGS_TITLE), tr(STR_SELECT), "", "");
+  const int settingsFrameTop = pageHeight - metrics.buttonHintsHeight;
+  TOUCH_UI.registerItem(0, settingsFrameTop, pageWidth / 2, metrics.buttonHintsHeight, 0,
+                        getMenuItemCount(), getMenuItemCount() + 1);
+#else
   const bool isCarouselTheme =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;
   const auto labels = isCarouselTheme ? mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT))
                                       : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+#endif
 
   renderer.displayBuffer();
 
@@ -1874,6 +1939,22 @@ void HomeActivity::onSelectBook(const std::string& path) {
   activityManager.goToReader(path);
 }
 
+void HomeActivity::registerCurrentBookTouchTarget() {
+#ifdef KOBO_LINUX
+  if ((APP_STATE.openEpubPath.empty() && recentBooks.empty()) || coverRectW <= 0 || coverRectH <= 0) return;
+  TOUCH_UI.registerDirect(coverRectX, coverRectY, coverRectW, coverRectH, TouchUiRegistry::TargetKind::Tab,
+                          kCurrentBookTouchTarget);
+#endif
+}
+
+void HomeActivity::openCurrentBookFromTouch() {
+  if (!APP_STATE.openEpubPath.empty() && Storage.exists(APP_STATE.openEpubPath.c_str())) {
+    onSelectBook(APP_STATE.openEpubPath);
+    return;
+  }
+  onContinueReading();
+}
+
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 
 void HomeActivity::onContinueReading() {
@@ -1886,9 +1967,15 @@ void HomeActivity::onRecentsOpen() { activityManager.goToRecentBooks(); }
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 
-void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
+void HomeActivity::onFileTransferOpen() {
+  // Do not silently create an open access point from the Home screen.  Until
+  // the Linux transfer service can reuse an existing STA/USB connection, the
+  // user explicitly selects the transport.  This is also the single route
+  // that exposes Calibre and nearby-sync modes.
+  activityManager.goToFileTransfer();
+}
 
-void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
+void HomeActivity::onOpdsBrowserOpen() { activityManager.goToLibrary(); }
 
 void HomeActivity::onReadingStatsOpen() {
   const int highlightedBookIdx = getHighlightedBookIndex();

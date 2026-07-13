@@ -7,6 +7,7 @@
 
 #include "CrossPointSettings.h"
 #include "GlobalActions.h"
+#include "components/TouchUiRegistry.h"
 
 namespace {
 using ButtonIndex = uint8_t;
@@ -161,7 +162,16 @@ bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint
   return false;
 }
 
-bool MappedInputManager::shouldUsePowerAsConfirmFallback() const { return !readerMode || powerAsConfirmInReaderMode; }
+bool MappedInputManager::shouldUsePowerAsConfirmFallback() const {
+#ifdef KOBO_LINUX
+  // N437 has a real dedicated power key. The ESP/Xteink fallback that turns
+  // an unassigned power action into Confirm makes a short press open the
+  // highlighted book on Home and is never valid for this port.
+  return false;
+#else
+  return !readerMode || powerAsConfirmInReaderMode;
+#endif
+}
 
 bool MappedInputManager::shouldMirrorPowerAsConfirmHold() const {
   return shouldUsePowerAsConfirmFallback() &&
@@ -403,5 +413,39 @@ void MappedInputManager::injectRelease(Button button) {
 void MappedInputManager::clearInjectedInputFrame() {
   injectedPressed.fill(false);
   injectedReleased.fill(false);
+  // Touch targets are one-frame messages.  Button edges and a direct target
+  // are both injected before Activity::loop(); keeping an unconsumed target
+  // for another frame could execute an action after the activity/modal that
+  // published it has already changed.
+  injectedTouchTargetAvailable = false;
+}
+
+void MappedInputManager::injectTouchTarget(const unsigned char kind, const int primary, const int secondary,
+                                           const std::uint32_t generation, const int x, const int y) {
+  injectedTouchTarget = {kind, primary, secondary, generation, x, y};
+  injectedTouchTargetAvailable = true;
+}
+
+bool MappedInputManager::consumeTouchTarget(TouchTarget& target) {
+  if (!injectedTouchTargetAvailable) return false;
+  target = injectedTouchTarget;
+  injectedTouchTargetAvailable = false;
+  // A direct target represents one rendered visual state. Once an activity
+  // acts on it, invalidate every remaining hitbox immediately rather than
+  // waiting for the asynchronous e-ink render to begin. This closes the
+  // interval in which a rapid second tap could resolve an old screen.
+  TOUCH_UI.clear();
+  return true;
+}
+
+bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& currentIndex) {
+  if (!injectedTouchTargetAvailable ||
+      injectedTouchTarget.kind != static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) return false;
+  targetIndex = injectedTouchTarget.primary;
+  currentIndex = injectedTouchTarget.secondary;
+  injectedTouchTargetAvailable = false;
+  // See consumeTouchTarget(): no second activation may use a previous render.
+  TOUCH_UI.clear();
+  return true;
 }
 #endif

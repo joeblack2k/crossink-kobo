@@ -2,7 +2,7 @@
 
 #include <string>
 
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
 #include <Arduino.h>
 
 MySerialImpl MySerialImpl::instance;

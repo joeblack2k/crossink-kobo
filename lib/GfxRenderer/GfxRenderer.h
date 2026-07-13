@@ -2,8 +2,12 @@
 
 #include <EpdFontFamily.h>
 #include <HalDisplay.h>
+#if defined(KOBO_LINUX)
+#include <KoboOwnedMutex.h>
+#else
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#endif
 
 namespace BidiUtils {
 // Paragraph base direction for the Unicode BiDi algorithm (UAX#9).
@@ -20,6 +24,7 @@ class SdCardFont;
 #include <cstring>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Bitmap.h"
@@ -56,7 +61,11 @@ class GfxRenderer {
   std::map<int, EpdFontFamily> fontMap;
   // Shared bitmap row buffers. Every read/write must be inside BitmapScratchLock;
   // ensureBitmapScratchBuffers() asserts that contract before exposing them.
+#if defined(KOBO_LINUX)
+  mutable crossink::kobo::KoboOwnedMutex bitmapScratchMutex_;
+#else
   mutable SemaphoreHandle_t bitmapScratchMutex_ = nullptr;
+#endif
   mutable uint8_t* bitmapScratchOutputRow_ = nullptr;
   mutable size_t bitmapScratchOutputRowSize_ = 0;
   mutable uint8_t* bitmapScratchRowBytes_ = nullptr;
@@ -116,9 +125,16 @@ class GfxRenderer {
       : display(halDisplay),
         renderMode(BW),
         orientation(Portrait),
-        fadingFix(false),
+        fadingFix(false)
+#if !defined(KOBO_LINUX)
+        ,
         bitmapScratchMutex_(xSemaphoreCreateMutex()) {
+#else
+  {
+#endif
+#if !defined(KOBO_LINUX)
     assert(bitmapScratchMutex_ != nullptr && "Failed to create GfxRenderer bitmap scratch mutex");
+#endif
   }
   GfxRenderer(const GfxRenderer&) = delete;
   GfxRenderer& operator=(const GfxRenderer&) = delete;
@@ -137,6 +153,8 @@ class GfxRenderer {
   // Setup
   void begin();  // must be called right after display.begin()
   void insertFont(int fontId, EpdFontFamily font);
+  // Replace an existing UI font registration without affecting reader fonts.
+  void replaceFont(int fontId, EpdFontFamily font) { fontMap.insert_or_assign(fontId, std::move(font)); }
   // Clears both the flash-font map and any SD-font registration for fontId.
   // Coupled to avoid dangling SdCardFont* in sdCardFonts_ when callers free
   // the underlying SdCardFont and forget the SD-side unregister.

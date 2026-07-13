@@ -26,6 +26,12 @@ struct OpdsEntry {
   std::string author;  // Only for books
   std::string href;    // Navigation URL or epub download URL
   std::string id;
+  std::string coverHref;
+  std::string coverRel;
+  std::string acquisitionType;
+  std::string series;
+  std::string seriesIndex;
+  std::string updated;
 };
 
 // Legacy alias for backward compatibility
@@ -190,6 +196,7 @@ class OpdsParser final : public Print {
   bool inAuthor = false;
   bool inAuthorName = false;
   bool inId = false;
+  bool inUpdated = false;
 
   bool errorOccured = false;
   OpdsParserError errorReason = OpdsParserError::NONE;

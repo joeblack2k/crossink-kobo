@@ -7,6 +7,7 @@
 
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "components/TouchUiRegistry.h"
 #include "components/UITheme.h"
 
 class OptionPopup {
@@ -49,6 +50,18 @@ class OptionPopup {
       active = false;
       return true;
     }
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+    MappedInputManager::TouchTarget touchTarget;
+    if (input.consumeTouchTarget(touchTarget) &&
+        touchTarget.kind == static_cast<unsigned char>(TouchUiRegistry::TargetKind::OptionItem) &&
+        touchTarget.primary >= 0 && touchTarget.primary < count) {
+      selectedIndex = touchTarget.primary;
+      active = false;
+      if (onSelectCallback) onSelectCallback(selectedIndex);
+      requestUpdate();
+      return true;
+    }
+#endif
     if (input.wasPressed(MappedInputManager::Button::Up) || input.wasPressed(MappedInputManager::Button::Left)) {
       selectedIndex = (selectedIndex - 1 + count) % count;
       requestUpdate();

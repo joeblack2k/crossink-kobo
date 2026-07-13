@@ -47,6 +47,23 @@ class HalGPIO {
   bool usbStateChanged = false;
 
  public:
+  // Keep physical model detection inside the hardware HAL. Shared activities
+  // consume capabilities so a new device does not have to impersonate X3/X4.
+  enum class DeviceFamily : uint8_t { X4, X3, N437 };
+  struct Capabilities {
+    DeviceFamily family;
+    bool hasTouch;
+    bool hasFrontButtons;
+    bool hasSideButtons;
+    bool sideButtonsAreHorizontal;
+    bool hasTilt;
+    bool hasRtc;
+    bool hasFrontlight;
+    bool hasWifi;
+    bool hasSuspend;
+  };
+
+  // X3/X4 remain an ESP hardware implementation detail.
   enum class DeviceType : uint8_t { X4, X3 };
 
  private:
@@ -58,6 +75,21 @@ class HalGPIO {
   // Inline device type helpers for cleaner downstream checks
   inline bool deviceIsX3() const { return _deviceType == DeviceType::X3; }
   inline bool deviceIsX4() const { return _deviceType == DeviceType::X4; }
+  [[nodiscard]] Capabilities capabilities() const {
+    return deviceIsX3() ? Capabilities{DeviceFamily::X3, false, true, true, true, true, true, false, true, true}
+                        : Capabilities{DeviceFamily::X4, false, true, true, false, false, false, false, true, true};
+  }
+  [[nodiscard]] DeviceFamily deviceFamily() const { return capabilities().family; }
+  [[nodiscard]] const char* deviceFamilyName() const { return deviceIsX3() ? "X3" : "X4"; }
+  [[nodiscard]] bool hasTouch() const { return capabilities().hasTouch; }
+  [[nodiscard]] bool hasFrontButtons() const { return capabilities().hasFrontButtons; }
+  [[nodiscard]] bool hasSideButtons() const { return capabilities().hasSideButtons; }
+  [[nodiscard]] bool sideButtonsAreHorizontal() const { return capabilities().sideButtonsAreHorizontal; }
+  [[nodiscard]] bool hasTilt() const { return capabilities().hasTilt; }
+  [[nodiscard]] bool hasRtc() const { return capabilities().hasRtc; }
+  [[nodiscard]] bool hasFrontlight() const { return capabilities().hasFrontlight; }
+  [[nodiscard]] bool hasWifi() const { return capabilities().hasWifi; }
+  [[nodiscard]] bool hasSuspend() const { return capabilities().hasSuspend; }
 
   // Start button GPIO and setup SPI for screen and SD card
   void begin();

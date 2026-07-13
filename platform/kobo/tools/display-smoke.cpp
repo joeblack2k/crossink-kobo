@@ -9,6 +9,8 @@
 
 #include "KoboDrmDisplay.h"
 #include "KoboFbInkDisplay.h"
+#include "KoboCpuFreq.h"
+#include "KoboRefreshQualification.h"
 
 using crossink::kobo::KoboFbInkDisplay;
 using crossink::kobo::KoboDrmDisplay;
@@ -75,19 +77,20 @@ RefreshKind parseRefresh(const char* value, bool& ok) {
   return RefreshKind::Full;
 }
 
-unsigned long parseUnsigned(const char* value, unsigned long maximum, bool& ok) {
+unsigned long parseUnsigned(const char* value, const unsigned long maximum, const bool allowZero, bool& ok) {
   char* end = nullptr;
   const unsigned long parsed = std::strtoul(value, &end, 10);
-  ok = end != value && *end == '\0' && parsed > 0 && parsed <= maximum;
+  ok = end != value && *end == '\0' && (allowZero || parsed > 0) && parsed <= maximum;
   return parsed;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc < 2 || argc > 5) {
+  if (argc < 2 || argc > 6) {
     std::fprintf(stderr,
-                 "usage: %s identity|clockwise|counterclockwise [fast|partial|full [iterations [delay-ms]]]\n",
+                 "usage: %s identity|clockwise|counterclockwise [fast|partial|full [iterations [delay-ms "
+                 "[--qualify-fast]]]]\n",
                  argv[0]);
     return 2;
   }
@@ -96,10 +99,16 @@ int main(int argc, char** argv) {
   if (!valid) return 2;
   const RefreshKind refresh = argc >= 3 ? parseRefresh(argv[2], valid) : RefreshKind::Full;
   if (!valid) return 2;
-  const unsigned long iterations = argc >= 4 ? parseUnsigned(argv[3], 10000, valid) : 1;
+  const unsigned long iterations = argc >= 4 ? parseUnsigned(argv[3], 10000, false, valid) : 1;
   if (!valid) return 2;
-  const unsigned long delayMs = argc >= 5 ? parseUnsigned(argv[4], 60000, valid) : 0;
+  const unsigned long delayMs = argc >= 5 ? parseUnsigned(argv[4], 60000, true, valid) : 0;
   if (!valid) return 2;
+  const bool qualifyFast = argc == 6;
+  if (qualifyFast && std::strcmp(argv[5], "--qualify-fast") != 0) return 2;
+  if (qualifyFast && (transform != SourceTransform::Identity || refresh != RefreshKind::Fast || iterations < 1000U)) {
+    std::fputs("Fast qualification requires identity transform, fast refresh and at least 1000 iterations\n", stderr);
+    return 2;
+  }
 
   // Keep the 194 KiB packed framebuffer out of the small process stack.
   static Frame frame{};
@@ -114,6 +123,17 @@ int main(int argc, char** argv) {
 
   KoboDrmDisplay drm;
   if (drm.open()) {
+    // Qualification is deliberately stricter than a smoke run: it may only
+    // use the kernel-advertised performance policy and must abort on a missing
+    // thermal signal or an unsafe rise.  KoboCpuFreqGuard restores the prior
+    // governor on every return path.
+    crossink::kobo::KoboCpuFreqGuard cpuBoost;
+    const int baselineTemperature = crossink::kobo::readSocTemperatureMilliC();
+    if (qualifyFast && (baselineTemperature < 0 || !cpuBoost.beginPerformanceBoost())) {
+      std::fprintf(stderr, "Fast qualification unavailable: temperature=%d cpu=%s\n", baselineTemperature,
+                   cpuBoost.lastError().c_str());
+      return 1;
+    }
     const auto start = std::chrono::steady_clock::now();
     for (unsigned long iteration = 0; iteration < iterations; ++iteration) {
       // Toggle a bounded central region so repeated refreshes exercise changed
@@ -123,11 +143,32 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "DRM display refresh failed at iteration %lu: %d\n", iteration + 1, drm.lastError());
         return 1;
       }
+      if (qualifyFast && (iteration % 10U) == 0U) {
+        const int temperature = crossink::kobo::readSocTemperatureMilliC();
+        if (temperature < 0 || temperature >= 75000 || temperature - baselineTemperature >= 15000) {
+          std::fprintf(stderr, "Fast qualification thermal stop at iteration %lu: baseline=%d current=%d\n",
+                       iteration + 1, baselineTemperature, temperature);
+          return 1;
+        }
+      }
       if (delayMs > 0) ::usleep(delayMs * 1000UL);
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    if (qualifyFast && !cpuBoost.endPerformanceBoost()) {
+      std::fputs("Fast qualification governor restore failed\n", stderr);
+      return 1;
+    }
     std::printf("backend=drm geometry=%ux%u iterations=%lu elapsed_ms=%lld\n", KoboFbInkDisplay::kPortraitWidth,
                 KoboFbInkDisplay::kPortraitHeight, iterations, static_cast<long long>(elapsed.count()));
+    if (qualifyFast) {
+      // Persist only after all iterations succeeded and the prior governor
+      // was restored.  A marker is device/kernel-bound and never created by
+      // the normal UI.
+      if (!crossink::kobo::recordKoboFastRefreshQualification()) {
+        std::fputs("Fast qualification marker write failed\n", stderr);
+        return 1;
+      }
+    }
     return 0;
   }
 

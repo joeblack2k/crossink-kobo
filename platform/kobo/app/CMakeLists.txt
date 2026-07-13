@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 project(crossink_kobo_app LANGUAGES C CXX)
 
+# The target-aware dependency audit consumes exactly this database.  It is
+# deliberately enabled for Buildroot as well as developer CMake builds, so CI
+# cannot accidentally audit a host/simulator source list instead of Kobo's.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 find_package(OpenSSL REQUIRED)
 
 set(CMAKE_C_STANDARD 11)
@@ -38,16 +43,29 @@ file(GLOB_RECURSE crossink_sources CONFIGURE_DEPENDS
 	"${CROSSINK_ROOT}/lib/*.c"
 	"${CROSSINK_ROOT}/lib/*.cpp"
 )
+# macOS can leave AppleDouble metadata beside a source file when an archive is
+# unpacked on a Linux build worker.  Those files start with `._` and CMake's
+# glob would otherwise compile their binary metadata as C++.
+list(FILTER crossink_sources EXCLUDE REGEX "/\\._")
 list(FILTER crossink_sources EXCLUDE REGEX "/lib/hal/")
 list(FILTER crossink_sources EXCLUDE REGEX "/lib/HalClockSim/")
 list(FILTER crossink_sources EXCLUDE REGEX "/test/")
 list(FILTER crossink_sources EXCLUDE REGEX "/tools/")
 list(FILTER crossink_sources EXCLUDE REGEX "/src/network/(CrossPointWebServer|FirmwareFlasher|OtaBootSwitch|OtaUpdater|WebDAVHandler)\\.cpp$")
+# Kobo never writes ESP OTA partitions.  The System menu deliberately hides
+# these activities, so compiling their simulator stubs into the device would
+# only leave unreachable ESP restart/partition code in the production binary.
+list(FILTER crossink_sources EXCLUDE REGEX "/src/activities/settings/(OtaUpdateActivity|SdFirmwareUpdateActivity)\\.cpp$")
+# Kobo uses the persistent native HTTP transfer service. The ESP USB CDC
+# command protocol has no hardware transport on N437 and must not pull the
+# simulator HWCDC shim into the production binary.
+list(FILTER crossink_sources EXCLUDE REGEX "UsbSerialFileTransfer")
 list(FILTER crossink_sources EXCLUDE REGEX "/src/platform/skip_efuse_blk_check\\.c$")
 list(FILTER crossink_sources EXCLUDE REGEX "/src/simulator/")
 
 file(GLOB simulator_sources CONFIGURE_DEPENDS "${CROSSPOINT_SIMULATOR_ROOT}/src/*.cpp")
-list(FILTER simulator_sources EXCLUDE REGEX "/(HalClock|HalDisplay|HalGPIO|HalPowerManager|HalTiltSensor|SimulatorSmokeTest|firmware_link_stubs|qrcode|simulator_main)\\.cpp$")
+list(FILTER simulator_sources EXCLUDE REGEX "/\\._")
+list(FILTER simulator_sources EXCLUDE REGEX "/(HalClock|HalDisplay|HalGPIO|HalPowerManager|HalSystem|HalTiltSensor|SimulatorSmokeTest|firmware_link_stubs|simulator_firmware|qrcode|simulator_main)\\.cpp$")
 
 file(GLOB_RECURSE dependency_sources CONFIGURE_DEPENDS
 	"${QRCODE_ROOT}/src/*.c"
@@ -57,6 +75,7 @@ file(GLOB_RECURSE dependency_sources CONFIGURE_DEPENDS
 	"${JPEGDEC_ROOT}/src/*.c"
 	"${JPEGDEC_ROOT}/src/*.cpp"
 )
+list(FILTER dependency_sources EXCLUDE REGEX "/\\._")
 
 function(collect_header_directories output)
 	set(result "")
@@ -84,6 +103,10 @@ add_executable(crossink-kobo
 	${simulator_sources}
 	${dependency_sources}
 	"${CMAKE_CURRENT_SOURCE_DIR}/kobo-main.cpp"
+	"${CROSSINK_ROOT}/platform/kobo/compat/WiFi.cpp"
+	"${CROSSINK_ROOT}/platform/kobo/compat/KoboRenderScheduler.cpp"
+	"${CROSSINK_ROOT}/platform/kobo/compat/KoboWifiAutoConnect.cpp"
+	"${CROSSINK_ROOT}/platform/kobo/compat/KoboWebTransferService.cpp"
 )
 target_include_directories(crossink-kobo PRIVATE
 	"${CROSSINK_ROOT}/platform/kobo/compat"
@@ -100,10 +123,15 @@ target_include_directories(crossink-kobo PRIVATE
 	${crossink_include_dirs}
 )
 target_compile_definitions(crossink-kobo PRIVATE
-	SIMULATOR
+	# Kobo is a POSIX host for Arduino compatibility only.  It must never select
+	# desktop-simulator product behaviour (fake heap/restart, smoke harness,
+	# ESP-NOW substitutes) merely because it reuses compatibility headers.
+	CROSSPOINT_POSIX
 	KOBO_LINUX
 	CROSSINK_VERSION="1.4.0-kobo-beta1"
 	CROSSPOINT_FIRMWARE_VARIANT="kobo-n437"
+	CROSSPOINT_NATIVE_BIND_ANY=1
+	CROSSPOINT_NATIVE_WEB_PORT=80
 	ENABLE_SERIAL_LOG
 	LOG_LEVEL=2
 	EINK_DISPLAY_SINGLE_BUFFER_MODE=1
@@ -121,6 +149,7 @@ target_compile_options(crossink-kobo PRIVATE -Wall -Wextra -Wno-narrowing -fno-e
 target_link_libraries(crossink-kobo PRIVATE
 	crossink_kobo_hal_display
 	crossink_kobo_hal_clock
+	crossink_kobo_hal_system
 	crossink_kobo_hal_gpio
 	crossink_kobo_hal_power
 	crossink_kobo_hal_tilt

@@ -9,6 +9,7 @@
 #include "CrossPointSettings.h"
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
+#include "components/DirectListTouch.h"
 #include "fontIds.h"
 
 void LanguageSelectActivity::onEnter() {
@@ -31,6 +32,8 @@ void LanguageSelectActivity::loop() {
     onBack();
     return;
   }
+
+  consumeDirectListSelection(mappedInput, totalItems, selectedIndex);
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     handleSelection();

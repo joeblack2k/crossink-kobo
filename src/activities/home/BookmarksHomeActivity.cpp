@@ -8,6 +8,7 @@
 #include "CrossPointState.h"
 #include "FileBrowserActionActivity.h"
 #include "MappedInputManager.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -43,6 +44,8 @@ void BookmarksHomeActivity::loop() {
     onGoHome();
     return;
   }
+
+  consumeDirectListSelection(mappedInput, static_cast<int>(books.size()), selectedIndex);
 
   if (!books.empty() && !longPressOpenHandled && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
       mappedInput.getHeldTime() >= BOOKMARK_DELETE_HOLD_MS) {

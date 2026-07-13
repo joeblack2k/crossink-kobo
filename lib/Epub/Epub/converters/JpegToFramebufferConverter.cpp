@@ -14,6 +14,7 @@
 #include "DirectPixelWriter.h"
 #include "DitherUtils.h"
 #include "PixelCache.h"
+#include "ProgressiveJpegDecoder.h"
 
 namespace {
 
@@ -428,7 +429,14 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
 
   bool isProgressive = jpeg->getJPEGType() == JPEG_MODE_PROGRESSIVE;
   if (isProgressive) {
-    LOG_INF("JPG", "Progressive JPEG detected - decoding DC coefficients only (lower quality)");
+    // JPEGDEC only implements a DC-only progressive path and that ARM path
+    // has caused a fatal signal on valid N437 EPUB images.  Keep JPEGDEC only
+    // long enough to obtain the already validated dimensions, then switch to
+    // the complete, bounded stb_image decoder.  This retains the identical
+    // renderer/cache target used by baseline JPEGs while avoiding the MCU path.
+    jpeg->close();
+    delete jpeg;
+    return decodeProgressiveJpegToFramebuffer(imagePath, renderer, config, srcWidth, srcHeight);
   }
 
   // Calculate overall target scale
@@ -487,8 +495,10 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   ctx.invScaleFPX = (int32_t)((int64_t)ctx.scaledSrcWidth * FP_ONE / destWidth);
   ctx.invScaleFPY = (int32_t)((int64_t)ctx.scaledSrcHeight * FP_ONE / destHeight);
 
-  LOG_DBG("JPG", "JPEG %dx%d -> %dx%d (scale %.2f, jpegScale 1/%d, fineScale %.2fx%.2f)%s", srcWidth, srcHeight,
-          destWidth, destHeight, targetScale, jpegScaleDenom, (float)destWidth / ctx.scaledSrcWidth,
+  LOG_DBG("JPG",
+          "JPEG %dx%d -> %dx%d target=(%d,%d %dx%d) orientation=%d (scale %.2f, jpegScale 1/%d, fineScale %.2fx%.2f)%s",
+          srcWidth, srcHeight, destWidth, destHeight, config.x, config.y, config.maxWidth, config.maxHeight,
+          static_cast<int>(renderer.getOrientation()), targetScale, jpegScaleDenom, (float)destWidth / ctx.scaledSrcWidth,
           (float)destHeight / ctx.scaledSrcHeight, isProgressive ? " [progressive]" : "");
 
   // Set pixel type to 8-bit grayscale (must be after open())

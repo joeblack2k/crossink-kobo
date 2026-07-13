@@ -303,6 +303,74 @@ void NearbyBookPositionSyncActivity::renderComparison() const {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, true);
 }
 
+#elif defined(KOBO_LINUX)
+
+#include <GfxRenderer.h>
+#include <I18n.h>
+
+#include <utility>
+
+#include "MappedInputManager.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
+
+// The Glo HD has no ESP-NOW radio.  Keep this explicit unavailable adapter
+// separate from the simulator's fake peer flow: a latent action can never
+// invent a remote reader or mutate the current reading position on Kobo.
+NearbyBookPositionSyncActivity::NearbyBookPositionSyncActivity(
+    GfxRenderer& renderer, MappedInputManager& mappedInput, std::shared_ptr<Epub> epub, const std::string& epubPath,
+    int currentSpineIndex, int currentPage, int totalPagesInSpine, KOReaderPosition localKoPos,
+    std::string localChapterName, std::optional<uint16_t> currentParagraphIndex,
+    std::optional<uint16_t> currentListItemIndex)
+    : Activity("NearbyBookPositionSync", renderer, mappedInput),
+      epub_(std::move(epub)),
+      epubPath_(epubPath),
+      localChapterName_(std::move(localChapterName)),
+      currentSpineIndex_(currentSpineIndex),
+      currentPage_(currentPage),
+      totalPagesInSpine_(totalPagesInSpine),
+      currentParagraphIndex_(currentParagraphIndex),
+      currentListItemIndex_(currentListItemIndex),
+      localKoPosition_(std::move(localKoPos)) {}
+
+NearbyBookPositionSyncActivity::~NearbyBookPositionSyncActivity() = default;
+
+void NearbyBookPositionSyncActivity::onEnter() {
+  Activity::onEnter();
+  errorMessage_ = tr(STR_NEARBY_POSITION_KOBO_UNAVAILABLE);
+  setState(State::ERROR);
+}
+
+void NearbyBookPositionSyncActivity::onExit() { Activity::onExit(); }
+
+void NearbyBookPositionSyncActivity::loop() {
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
+      mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    mappedInput.suppressNextBackRelease();
+    finish();
+  }
+}
+
+void NearbyBookPositionSyncActivity::render(RenderLock&&) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  renderer.clearScreen();
+  GUI.drawHeader(renderer, Rect{screen.x, screen.y + metrics.topPadding, screen.width, metrics.headerHeight},
+                 tr(STR_NEARBY_POSITION_SYNC));
+  UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, screen.y + screen.height / 2 - 16,
+                            tr(STR_NEARBY_POSITION_KOBO_UNAVAILABLE), true, EpdFontFamily::BOLD);
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, true);
+  renderer.displayBuffer();
+}
+
+void NearbyBookPositionSyncActivity::enqueueEspNowPacket(const uint8_t*, const uint8_t*, int) {}
+
+void NearbyBookPositionSyncActivity::setState(const State state) {
+  state_ = state;
+  requestUpdate();
+}
+
 #else
 
 #include <GfxRenderer.h>

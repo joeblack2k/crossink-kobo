@@ -9,13 +9,14 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
 // Editable fields: Name, URL, Username, Password, Filename.
 // Existing servers also show a Delete option (BASE_ITEMS + 1).
-constexpr int BASE_ITEMS = 5;
+constexpr int BASE_ITEMS = 6;
 }  // namespace
 
 int OpdsSettingsActivity::getMenuItemCount() const {
@@ -52,6 +53,8 @@ void OpdsSettingsActivity::loop() {
     finish();
     return;
   }
+
+  consumeDirectListSelection(mappedInput, getMenuItemCount(), selectedIndex);
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     handleSelection();
@@ -162,7 +165,11 @@ void OpdsSettingsActivity::handleSelection() {
                                     : OpdsFilenameFormat::AUTHOR_TITLE;
     saveServer();
     requestUpdate();
-  } else if (selectedIndex == 5 && !isNewServer) {
+  } else if (selectedIndex == 5) {
+    editServer.syncAllBooks = !editServer.syncAllBooks;
+    saveServer();
+    requestUpdate();
+  } else if (selectedIndex == 6 && !isNewServer) {
     // Delete flow is only available for existing servers.
     if (!OPDS_STORE.removeServer(static_cast<size_t>(serverIndex))) {
       LOG_ERR("OPS", "Failed to remove OPDS server at index %d", serverIndex);
@@ -197,9 +204,10 @@ void OpdsSettingsActivity::render(RenderLock&&) {
   GUI.drawList(
       renderer, Rect{0, contentTop, pageWidth, contentHeight}, menuItems, static_cast<int>(selectedIndex),
       [this, &fieldNames](int index) {
-        if (index < BASE_ITEMS) {
+        if (index < 5) {
           return std::string(I18N.get(fieldNames[index]));
         }
+        if (index == 5) return std::string("Sync all books offline");
         return std::string(tr(STR_DELETE_SERVER));
       },
       nullptr, nullptr,
@@ -215,7 +223,7 @@ void OpdsSettingsActivity::render(RenderLock&&) {
         } else if (index == 4) {
           return editServer.filenameFormat == OpdsFilenameFormat::TITLE_AUTHOR ? std::string(tr(STR_TITLE_AUTHOR))
                                                                                : std::string(tr(STR_AUTHOR_TITLE));
-        }
+        } else if (index == 5) return editServer.syncAllBooks ? std::string("On") : std::string("Off");
         return std::string("");
       },
       true);

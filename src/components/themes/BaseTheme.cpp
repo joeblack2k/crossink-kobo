@@ -1,5 +1,11 @@
 #include "BaseTheme.h"
 
+#ifdef KOBO_LINUX
+#include <WiFi.h>
+
+#include "components/TouchUiRegistry.h"
+#endif
+
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
@@ -16,6 +22,7 @@
 #include "activities/reader/BookReadingStats.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "platform/DeviceCapabilities.h"
 
 // Internal constants
 namespace {
@@ -51,6 +58,42 @@ void BaseTheme::drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX,
   renderer.drawLine(boltX + 1, boltY + 5, boltX + 4, boltY + 5, foregroundBlack);
   renderer.drawLine(boltX + 2, boltY + 6, boltX + 3, boltY + 6, foregroundBlack);
   renderer.drawLine(boltX + 1, boltY + 7, boltX + 2, boltY + 7, foregroundBlack);
+}
+
+int BaseTheme::wifiIndicatorWidth(const ThemeMetrics& metrics) {
+#ifdef KOBO_LINUX
+  // Keep the Wi-Fi glyph visibly heavier than the battery at every Kobo UI
+  // scale. The old fixed 32px slot stayed tiny at 200–250%.
+  return std::max(32, metrics.batteryWidth * 2);
+#else
+  return 0;
+#endif
+}
+
+bool BaseTheme::wifiConnected() {
+#ifdef KOBO_LINUX
+  return WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
+#else
+  return false;
+#endif
+}
+
+void BaseTheme::drawWifiIndicator(const GfxRenderer& renderer, const Rect rect, const bool foregroundBlack) {
+  if (!wifiConnected() || rect.width <= 0 || rect.height <= 0) return;
+  const int radius = std::max(6, std::min(rect.width / 2 - 2, rect.height - 1));
+  const int centerX = rect.x + rect.width / 2;
+  const int baseY = rect.y + rect.height - 1;
+  // Three generous 1-bit arcs and a 5 px dot stay legible after a partial
+  // e-ink refresh and intentionally balance the battery icon's visual weight.
+  renderer.drawArc(radius, centerX, baseY, -1, -1, 1, foregroundBlack);
+  renderer.drawArc(radius, centerX, baseY, 1, -1, 1, foregroundBlack);
+  const int middleRadius = std::max(4, (radius * 2) / 3);
+  renderer.drawArc(middleRadius, centerX, baseY, -1, -1, 1, foregroundBlack);
+  renderer.drawArc(middleRadius, centerX, baseY, 1, -1, 1, foregroundBlack);
+  const int innerRadius = std::max(3, radius / 3);
+  renderer.drawArc(innerRadius, centerX, baseY, -1, -1, 1, foregroundBlack);
+  renderer.drawArc(innerRadius, centerX, baseY, 1, -1, 1, foregroundBlack);
+  renderer.fillRect(centerX - 2, baseY - 2, 5, 5, foregroundBlack);
 }
 
 void BaseTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage,
@@ -166,7 +209,8 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   // X3 has wider screen in portrait (528 vs 480), use more spacing
   constexpr int x4ButtonPositions[] = {25, 130, 245, 350};
   constexpr int x3ButtonPositions[] = {38, 154, 268, 384};
-  const int* buttonPositions = gpio.deviceIsX3() ? x3ButtonPositions : x4ButtonPositions;
+  const int* buttonPositions =
+      crossink::platform::deviceCapabilities(gpio).sideButtonsAreHorizontal ? x3ButtonPositions : x4ButtonPositions;
   const char* labels[] = {btn1, btn2, btn3, btn4};
 
   for (int i = 0; i < 4; i++) {
@@ -226,12 +270,14 @@ void BaseTheme::drawKoboTouchFrame(GfxRenderer& renderer, const char* btn1, cons
 #endif
 
 void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
+  const auto capabilities = crossink::platform::deviceCapabilities(gpio);
+  if (!capabilities.hasSideButtons) return;
   const int screenWidth = renderer.getScreenWidth();
   constexpr int buttonWidth = BaseMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
   constexpr int buttonHeight = 80;                                       // Height on screen (width when rotated)
   constexpr int buttonMargin = 4;
 
-  if (gpio.deviceIsX3()) {
+  if (capabilities.sideButtonsAreHorizontal) {
     // X3 layout: Up on left side, Down on right side, positioned higher
     constexpr int x3ButtonY = 155;
 
@@ -297,8 +343,8 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
                          const std::function<bool(int index)>& rowDimmed,
                          const std::function<bool(int index)>& isHeader) const {
-  int rowHeight =
-      (rowSubtitle != nullptr) ? BaseMetrics::values.listWithSubtitleRowHeight : BaseMetrics::values.listRowHeight;
+  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+  int rowHeight = (rowSubtitle != nullptr) ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
   int pageItems = rect.height / rowHeight;
   constexpr int sectionHeaderTopPadding = 15;
 
@@ -354,7 +400,13 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
 
-    int rowTextWidth = contentWidth - BaseMetrics::values.contentSidePadding * 2;
+#ifdef KOBO_LINUX
+    if (!(isHeader && isHeader(i))) {
+      TOUCH_UI.registerItem(rect.x, itemY, rect.width, rowHeight, selectedIndex, i, itemCount);
+    }
+#endif
+
+    int rowTextWidth = contentWidth - metrics.contentSidePadding * 2;
     std::string valueText;
     if (rowValue != nullptr) {
       valueText = rowValue(i);
@@ -370,17 +422,16 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     auto font = UI_10_FONT_ID;
     auto item = renderer.truncatedText(font, itemName.c_str(), rowTextWidth);
     if (isHeader && isHeader(i)) {
-      renderer.drawText(font, rect.x + BaseMetrics::values.contentSidePadding, itemY, item.c_str(), true,
-                        EpdFontFamily::BOLD);
+      renderer.drawText(font, rect.x + metrics.contentSidePadding, itemY, item.c_str(), true, EpdFontFamily::BOLD);
       continue;
     }
-    renderer.drawText(font, rect.x + BaseMetrics::values.contentSidePadding, itemY, item.c_str(), i != selectedIndex);
+    renderer.drawText(font, rect.x + metrics.contentSidePadding, itemY, item.c_str(), i != selectedIndex);
 
     // Apply checkerboard dither to create gray text effect for dimmed items
     if (rowDimmed && rowDimmed(i) && i != selectedIndex) {
       const int titleWidth = renderer.getTextWidth(font, item.c_str());
       const int lineH = renderer.getLineHeight(font);
-      const int tx = rect.x + BaseMetrics::values.contentSidePadding;
+      const int tx = rect.x + metrics.contentSidePadding;
       for (int py = itemY; py < itemY + lineH; py++)
         for (int px = tx; px < tx + titleWidth; px++)
           if ((px + py) % 2 == 0) renderer.drawPixel(px, py, false);
@@ -390,7 +441,8 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       std::string subtitleText = rowSubtitle(i);
       if (!subtitleText.empty()) {
         auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
-        renderer.drawText(SMALL_FONT_ID, rect.x + BaseMetrics::values.contentSidePadding, itemY + 22, subtitle.c_str(),
+        const int subtitleY = itemY + renderer.getLineHeight(UI_10_FONT_ID) + metrics.verticalSpacing / 2;
+        renderer.drawText(SMALL_FONT_ID, rect.x + metrics.contentSidePadding, subtitleY, subtitle.c_str(),
                           i != selectedIndex);
       }
     }
@@ -401,38 +453,42 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       if (rowSubtitle != nullptr) {
         valueY = itemY + 10;
       }
-      renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - BaseMetrics::values.contentSidePadding - valueTextWidth,
-                        valueY, valueText.c_str(), i != selectedIndex);
+      renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - metrics.contentSidePadding - valueTextWidth, valueY,
+                        valueText.c_str(), i != selectedIndex);
     }
   }
 }
 
 void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
                            const bool readerContext) const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
   // Hide last battery draw
-  constexpr int maxBatteryWidth = 80;
+  const int maxBatteryWidth = std::max(80, metrics.batteryWidth * 3 + 48);
   renderer.fillRect(rect.x + rect.width - maxBatteryWidth, rect.y + homeHeaderTopInset, maxBatteryWidth,
-                    BaseMetrics::values.batteryHeight + 10, false);
+                    metrics.batteryHeight + 10, false);
 
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
   // Position icon at right edge, drawBatteryRight will place text to the left
-  const int batteryX = rect.x + rect.width - 12 - BaseMetrics::values.batteryWidth;
+  const int batteryX = rect.x + rect.width - metrics.statusBarHorizontalMargin - metrics.batteryWidth;
   const int batteryY = rect.y + homeHeaderTopInset;
-  drawBatteryRight(renderer,
-                   Rect{batteryX, batteryY, BaseMetrics::values.batteryWidth, BaseMetrics::values.batteryHeight},
+  const int batteryTextWidth =
+      showBatteryPercentage ? renderer.getTextWidth(SMALL_FONT_ID, "100%") + batteryPercentSpacing : 0;
+  const int wifiWidth = wifiIndicatorWidth(metrics);
+  drawWifiIndicator(renderer,
+                    Rect{batteryX - batteryTextWidth - wifiWidth - 4, batteryY, wifiWidth, metrics.batteryHeight});
+  drawBatteryRight(renderer, Rect{batteryX, batteryY, metrics.batteryWidth, metrics.batteryHeight},
                    showBatteryPercentage);
 
   if (title) {
-    int padding = rect.width - batteryX + BaseMetrics::values.batteryWidth;
-    auto truncatedTitle = renderer.truncatedText(UI_12_FONT_ID, title,
-                                                 rect.width - padding * 2 - BaseMetrics::values.contentSidePadding * 2,
-                                                 EpdFontFamily::BOLD);
+    int padding = rect.width - batteryX + metrics.batteryWidth + batteryTextWidth + wifiWidth + 4;
+    auto truncatedTitle = renderer.truncatedText(
+        UI_12_FONT_ID, title, rect.width - padding * 2 - metrics.contentSidePadding * 2, EpdFontFamily::BOLD);
     const bool showHeaderClock = halClock.isAvailable() && (readerContext ? SETTINGS.shouldShowClockInReader()
                                                                           : SETTINGS.shouldShowClockOutsideReader());
     if (showHeaderClock) {
-      renderer.drawText(UI_12_FONT_ID, rect.x + BaseMetrics::values.contentSidePadding, rect.y + 5,
-                        truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
+      renderer.drawText(UI_12_FONT_ID, rect.x + metrics.contentSidePadding, rect.y + 5, truncatedTitle.c_str(), true,
+                        EpdFontFamily::BOLD);
     } else {
       renderer.drawCenteredText(UI_12_FONT_ID, rect.y + 5, truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
     }
@@ -440,11 +496,10 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
 
   if (subtitle) {
     auto truncatedSubtitle = renderer.truncatedText(
-        SMALL_FONT_ID, subtitle, rect.width - BaseMetrics::values.contentSidePadding * 2, EpdFontFamily::REGULAR);
+        SMALL_FONT_ID, subtitle, rect.width - metrics.contentSidePadding * 2, EpdFontFamily::REGULAR);
     int truncatedSubtitleWidth = renderer.getTextWidth(SMALL_FONT_ID, truncatedSubtitle.c_str());
-    renderer.drawText(SMALL_FONT_ID,
-                      rect.x + rect.width - BaseMetrics::values.contentSidePadding - truncatedSubtitleWidth, subtitleY,
-                      truncatedSubtitle.c_str(), true);
+    renderer.drawText(SMALL_FONT_ID, rect.x + rect.width - metrics.contentSidePadding - truncatedSubtitleWidth,
+                      subtitleY, truncatedSubtitle.c_str(), true);
   }
 
   drawTopStatusBarClock(renderer, rect.y, nullptr, readerContext,
@@ -481,9 +536,14 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
 
   int currentX = rect.x + BaseMetrics::values.contentSidePadding;
 
-  for (const auto& tab : tabs) {
+  for (std::size_t index = 0; index < tabs.size(); ++index) {
+    const auto& tab = tabs[index];
     const int textWidth =
         renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerDirect(currentX - 6, rect.y, textWidth + 12, rect.height, TouchUiRegistry::TargetKind::Tab,
+                            static_cast<int>(index));
+#endif
 
     // Draw underline for selected tab
     if (tab.selected) {
@@ -708,13 +768,20 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     if (totalPages > 1) {
       tileWidth -= 30;  // some margin for scroll arrows
     }
+    // A menu can end immediately above Kobo's permanent touch frame. Never
+    // publish or draw a final fixed-height row into that reserved footer.
+    const int tileHeight = std::min(BaseMetrics::values.menuRowHeight, rect.y + rect.height - tileY);
+    if (tileHeight <= 0) break;
+
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerItem(rect.x + BaseMetrics::values.contentSidePadding, tileY, tileWidth, tileHeight, selectedIndex,
+                          i, buttonCount);
+#endif
 
     if (selected) {
-      renderer.fillRect(rect.x + BaseMetrics::values.contentSidePadding, tileY, tileWidth,
-                        BaseMetrics::values.menuRowHeight);
+      renderer.fillRect(rect.x + BaseMetrics::values.contentSidePadding, tileY, tileWidth, tileHeight);
     } else {
-      renderer.drawRect(rect.x + BaseMetrics::values.contentSidePadding, tileY, tileWidth,
-                        BaseMetrics::values.menuRowHeight);
+      renderer.drawRect(rect.x + BaseMetrics::values.contentSidePadding, tileY, tileWidth, tileHeight);
     }
 
     const char* label = buttonLabel != nullptr ? buttonLabel(i) : "";
@@ -722,8 +789,7 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, label);
     const int textX = rect.x + BaseMetrics::values.contentSidePadding + (tileWidth - textWidth) / 2;
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-    const int textY =
-        tileY + (BaseMetrics::values.menuRowHeight - lineHeight) / 2;  // vertically centered assuming y is top of text
+    const int textY = tileY + (tileHeight - lineHeight) / 2;
     // Invert text when the tile is selected, to contrast with the filled background
     renderer.drawText(UI_10_FONT_ID, textX, textY, label, selectedIndex != i);
   }
@@ -1179,6 +1245,11 @@ void BaseTheme::drawOptionPopup(const GfxRenderer& renderer, const char* title, 
     const int itemY = y + visibleIndex * (rowHeight + itemSpacing);
     const bool selected = (optionIndex == safeSelectedIndex);
     const char* labelText = options[optionIndex].c_str();
+
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerDirect(itemRectX, itemY, itemRectW, rowHeight, TouchUiRegistry::TargetKind::OptionItem,
+                            optionIndex);
+#endif
 
     if (metrics.optionPopupDrawAllRows || selected) {
       Color rowColor;

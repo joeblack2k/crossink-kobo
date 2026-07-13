@@ -4,10 +4,13 @@
 #include <HalGPIO.h>
 #include <I18n.h>
 
+#include <algorithm>
 #include <cstdio>
 
 #include "MappedInputManager.h"
+#include "components/TouchSlider.h"
 #include "components/UITheme.h"
+#include "platform/DeviceCapabilities.h"
 #include "fontIds.h"
 
 namespace {
@@ -36,6 +39,11 @@ void EpubReaderPercentSelectionActivity::adjustPercent(const int delta) {
 }
 
 void EpubReaderPercentSelectionActivity::loop() {
+  if (TouchSlider::consume(mappedInput, 0, 100, percent)) {
+    requestUpdate();
+    return;
+  }
+
   // Back cancels, confirm selects, arrows adjust the percent.
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     ActivityResult result;
@@ -57,8 +65,9 @@ void EpubReaderPercentSelectionActivity::loop() {
   // On X3 the side buttons sit on the left/right edges of the screen rather than as a vertical up/down
   // rocker (X4), so BTN_UP is physically the left button and BTN_DOWN the right one. Flip the large-step
   // direction there so the left button decreases and the right button increases, matching the layout.
-  const int upDelta = gpio.deviceIsX3() ? -kLargeStep : kLargeStep;
-  const int downDelta = gpio.deviceIsX3() ? kLargeStep : -kLargeStep;
+  const auto capabilities = crossink::platform::deviceCapabilities(gpio);
+  const int upDelta = capabilities.sideButtonsAreHorizontal ? -kLargeStep : kLargeStep;
+  const int downDelta = capabilities.sideButtonsAreHorizontal ? kLargeStep : -kLargeStep;
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this, upDelta] { adjustPercent(upDelta); });
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down},
                                        [this, downDelta] { adjustPercent(downDelta); });
@@ -80,11 +89,13 @@ void EpubReaderPercentSelectionActivity::render(RenderLock&&) {
   UITheme::drawCenteredText(renderer, screen, UI_12_FONT_ID, contentTop, percentText.c_str(), true,
                             EpdFontFamily::BOLD);
 
-  // Draw slider track.
-  constexpr int barWidth = 360;
-  constexpr int barHeight = 16;
-  const int barX = screen.x + (screen.width - barWidth) / 2;
-  const int barY = contentTop + metrics.verticalSpacing * 2;
+  // Draw a full-width, finger-sized slider.  The X4's 360px control and its
+  // hardware-button hints became too small and overlapped at the Glo HD's
+  // 200% UI scale.
+  const int barWidth = std::max(1, screen.width - metrics.contentSidePadding * 2);
+  const int barHeight = std::max(16, renderer.getLineHeight(UI_10_FONT_ID));
+  const int barX = screen.x + metrics.contentSidePadding;
+  const int barY = contentTop + renderer.getLineHeight(UI_12_FONT_ID) + metrics.verticalSpacing;
 
   renderer.drawRect(barX, barY, barWidth, barHeight);
 
@@ -98,6 +109,15 @@ void EpubReaderPercentSelectionActivity::render(RenderLock&&) {
   const int knobX = barX + 2 + fillWidth - 2;
   renderer.fillRect(knobX, barY - 4, 4, barHeight + 8, true);
 
+#ifdef KOBO_LINUX
+  constexpr int kTouchStep = 10;
+  const int segmentCount = TouchSlider::segmentCount(0, 100, kTouchStep);
+  TouchSlider::registerSegments(barX, barY, barWidth, barHeight, 0, 100, kTouchStep);
+  for (int segment = 1; segment < segmentCount; ++segment) {
+    const int x = barX + (segment * barWidth) / segmentCount;
+    renderer.drawLine(x, barY + 2, x, barY + barHeight - 3, true);
+  }
+#else
   // Two-line step hint built from separate label + value strings (front buttons = fine step, side
   // buttons = coarse step), so the layout doesn't depend on a separator hidden in translated text.
   char line[64];
@@ -105,6 +125,7 @@ void EpubReaderPercentSelectionActivity::render(RenderLock&&) {
   UITheme::drawCenteredText(renderer, screen, SMALL_FONT_ID, barY + 30, line, true);
   snprintf(line, sizeof(line), "%s %d%%", I18N.get(StrId::STR_STEP_HINT_SIDE), kLargeStep);
   UITheme::drawCenteredText(renderer, screen, SMALL_FONT_ID, barY + 52, line, true);
+#endif
 
   // Button hints follow the current front button layout.
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "-", "+");

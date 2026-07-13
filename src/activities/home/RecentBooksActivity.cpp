@@ -16,6 +16,7 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/OptionSelectionActivity.h"
 #include "components/CompactHeader.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -77,6 +78,8 @@ void RecentBooksActivity::loop() {
     }
     return;
   }
+
+  consumeDirectListSelection(mappedInput, static_cast<int>(recentBooks.size()), selectorIndex);
 
   // Long-press Confirm on the selected book: open the same action menu shape used by File Browser.
   // Fires when the hold times out while still held (firmware hold-to-act pattern,

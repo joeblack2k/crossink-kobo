@@ -8,8 +8,10 @@
 #include <cstdio>
 #include <utility>
 
+#include "components/TouchSlider.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "platform/DeviceCapabilities.h"
 
 namespace {
 void formatCompactSeconds(const int seconds, char* buf, const size_t len) {
@@ -73,14 +75,22 @@ void IntervalSelectionActivity::loop() {
     return;
   }
 
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  if (TouchSlider::consume(mappedInput, minValue, maxValue, value)) {
+    requestUpdate();
+    return;
+  }
+#endif
+
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [this] { adjustValue(-smallStep); });
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] { adjustValue(smallStep); });
 
   // On X3 the side buttons sit on the left/right edges of the screen rather than as a vertical up/down
   // rocker (X4), so BTN_UP is physically the left button and BTN_DOWN the right one. Flip the large-step
   // direction there so the left button decreases and the right button increases, matching the layout.
-  const int upDelta = gpio.deviceIsX3() ? -largeStep : largeStep;
-  const int downDelta = gpio.deviceIsX3() ? largeStep : -largeStep;
+  const auto capabilities = crossink::platform::deviceCapabilities(gpio);
+  const int upDelta = capabilities.sideButtonsAreHorizontal ? -largeStep : largeStep;
+  const int downDelta = capabilities.sideButtonsAreHorizontal ? largeStep : -largeStep;
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this, upDelta] { adjustValue(upDelta); });
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down},
                                        [this, downDelta] { adjustValue(downDelta); });
@@ -90,10 +100,11 @@ void IntervalSelectionActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int screenWidth = renderer.getScreenWidth();
+  const Rect screen = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  const int screenWidth = screen.width;
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, screenWidth, metrics.headerHeight}, I18N.get(titleId), nullptr,
-                 readerActivity);
+  GUI.drawHeader(renderer, Rect{screen.x, screen.y + metrics.topPadding, screenWidth, metrics.headerHeight},
+                 I18N.get(titleId), nullptr, readerActivity);
 
   char formattedValue[32];
   if (maxBoundaryLabelId != StrId::STR_NONE_OPT && value == maxValue) {
@@ -107,12 +118,13 @@ void IntervalSelectionActivity::render(RenderLock&&) {
   } else {
     snprintf(formattedValue, sizeof(formattedValue), "%d", value);
   }
-  renderer.drawCenteredText(UI_12_FONT_ID, 90, formattedValue, true, EpdFontFamily::BOLD);
+  const int valueY = screen.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  renderer.drawCenteredText(UI_12_FONT_ID, valueY, formattedValue, true, EpdFontFamily::BOLD);
 
-  const int barWidth = std::min(360, std::max(0, screenWidth - 40));
-  constexpr int barHeight = 16;
-  const int barX = std::max(0, (screenWidth - barWidth) / 2);
-  const int barY = 140;
+  const int barWidth = std::max(1, screen.width - metrics.contentSidePadding * 2);
+  const int barHeight = std::max(16, renderer.getLineHeight(UI_10_FONT_ID));
+  const int barX = screen.x + metrics.contentSidePadding;
+  const int barY = valueY + renderer.getLineHeight(UI_12_FONT_ID) + metrics.verticalSpacing;
 
   renderer.drawRect(barX, barY, barWidth, barHeight);
 
@@ -125,11 +137,26 @@ void IntervalSelectionActivity::render(RenderLock&&) {
   const int knobX = std::max(barX + 2, barX + 2 + fillWidth - 2);
   renderer.fillRect(knobX, barY - 4, 4, barHeight + 8, true);
 
+#ifdef KOBO_LINUX
+  // One-minute cells would be too small for a finger.  Publish large-step
+  // cells instead: a tap picks the nearest useful timeout directly, while
+  // physical/keyboard left/right remains available for the upstream's exact
+  // one-minute adjustment semantics.
+  const int segmentCount = TouchSlider::segmentCount(minValue, maxValue, largeStep);
+  TouchSlider::registerSegments(barX, barY, barWidth, barHeight, minValue, maxValue, largeStep);
+  for (int segment = 0; segment < segmentCount; ++segment) {
+    const int segmentX = barX + (segment * barWidth) / segmentCount;
+    if (segment != 0) {
+      renderer.drawLine(segmentX, barY + 2, segmentX, barY + barHeight - 3, true);
+    }
+  }
+#else
   // Two-line step hint: front buttons do the small step, side buttons the large step. Built from
   // separate label + value strings (rather than splitting one localized sentence) so the layout
   // doesn't depend on translators preserving a hidden separator.
   drawStepHintLine(barY + 30, StrId::STR_STEP_HINT_FRONT, smallStep);
   drawStepHintLine(barY + 52, StrId::STR_STEP_HINT_SIDE, largeStep);
+#endif
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "-", "+");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, readerActivity);

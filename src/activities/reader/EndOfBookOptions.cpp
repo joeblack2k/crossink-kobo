@@ -6,6 +6,7 @@
 
 #include "CrossPointSettings.h"
 #include "ReaderUtils.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
@@ -40,7 +41,16 @@ std::string EndOfBookOptions::fullPath(const size_t index) const {
   return folder == "/" ? "/" + names[index] : folder + "/" + names[index];
 }
 
-EndOfBookOptions::Action EndOfBookOptions::handleMenuInput(const MappedInputManager& input, std::string* openPath) {
+EndOfBookOptions::Action EndOfBookOptions::handleMenuInput(MappedInputManager& input, std::string* openPath) {
+  const int itemCount = static_cast<int>(names.size()) + 1;  // + "Home" entry
+  if (consumeDirectListTarget(input, itemCount, selector)) {
+    if (selector < static_cast<int>(names.size())) {
+      if (openPath) *openPath = fullPath(selector);
+      return Action::OpenBook;
+    }
+    return Action::GoHome;
+  }
+
   if (input.wasReleased(MappedInputManager::Button::Confirm)) {
     if (selector < static_cast<int>(names.size())) {
       if (openPath) {
@@ -63,7 +73,6 @@ EndOfBookOptions::Action EndOfBookOptions::handleMenuInput(const MappedInputMana
   const auto sideTriggered = [&](const MappedInputManager::Button button) {
     return sideUsePress ? input.wasPressed(button) : input.wasReleased(button);
   };
-  const int itemCount = static_cast<int>(names.size()) + 1;  // + "Home" entry
   if (sideTriggered(MappedInputManager::Button::PageBack) || input.wasReleased(MappedInputManager::Button::Left)) {
     selector = ButtonNavigator::previousIndex(selector, itemCount);  // wraps to the bottom
     return Action::Redraw;

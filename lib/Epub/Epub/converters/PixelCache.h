@@ -8,6 +8,19 @@
 #include <cstring>
 #include <string>
 
+namespace pixelcache {
+
+// Keep the cache format self-identifying.  Old cache files were only width,
+// height and packed pixels, so a layout or decoder change could make a stale
+// file look superficially valid.  Fields are written individually below; this
+// is deliberately not a packed C++ struct.
+constexpr uint32_t kMagic = 0x31435850U;  // "PXC1" in little-endian storage.
+constexpr uint8_t kVersion = 1;
+constexpr uint8_t kBitsPerPixel = 2;
+constexpr size_t kHeaderSize = sizeof(kMagic) + sizeof(kVersion) + sizeof(kBitsPerPixel) + sizeof(uint16_t) * 2U;
+
+}  // namespace pixelcache
+
 // Streaming cache writer for 2-bit pixels (4 levels). Packs 4 pixels per byte,
 // MSB first.
 //
@@ -38,6 +51,7 @@ struct PixelCache {
   int flushedRows;  // image-local rows already written to file
   HalFile file;
   std::string cachePathStr;
+  std::string temporaryPathStr;
   bool ok;
 
   PixelCache()
@@ -96,18 +110,28 @@ struct PixelCache {
     memset(buffer, 0, bufSize);
     zeroRow = buffer + (size_t)bandRows * bytesPerRow;
 
-    if (!Storage.openFileForWrite("IMG", cachePath, file)) {
-      LOG_ERR("IMG", "Failed to open cache file for writing: %s", cachePath.c_str());
+    cachePathStr = cachePath;
+    temporaryPathStr = cachePath + ".part";
+    // A power loss or failed decoder must not replace a known-good cache with
+    // a truncated file.  Readers ignore .part files; publish only after a
+    // complete header and all rows have been written.
+    Storage.remove(temporaryPathStr.c_str());
+    if (!Storage.openFileForWrite("IMG", temporaryPathStr, file)) {
+      LOG_ERR("IMG", "Failed to open cache file for writing: %s", temporaryPathStr.c_str());
       free(buffer);
       buffer = nullptr;
       return false;
     }
-    cachePathStr = cachePath;
 
     uint16_t w16 = (uint16_t)w;
     uint16_t h16 = (uint16_t)h;
-    if (file.write(&w16, 2) != 2 || file.write(&h16, 2) != 2) {
-      LOG_ERR("IMG", "Failed to write cache header: %s", cachePath.c_str());
+    const uint32_t magic = pixelcache::kMagic;
+    const uint8_t version = pixelcache::kVersion;
+    const uint8_t bitsPerPixel = pixelcache::kBitsPerPixel;
+    if (file.write(&magic, sizeof(magic)) != sizeof(magic) || file.write(&version, sizeof(version)) != sizeof(version) ||
+        file.write(&bitsPerPixel, sizeof(bitsPerPixel)) != sizeof(bitsPerPixel) || file.write(&w16, sizeof(w16)) != sizeof(w16) ||
+        file.write(&h16, sizeof(h16)) != sizeof(h16)) {
+      LOG_ERR("IMG", "Failed to write cache header: %s", temporaryPathStr.c_str());
       abort();
       return false;
     }
@@ -157,8 +181,14 @@ struct PixelCache {
       }
     }
     file.close();
+    if (!Storage.rename(temporaryPathStr.c_str(), cachePathStr.c_str())) {
+      LOG_ERR("IMG", "Failed to publish cache: %s", cachePathStr.c_str());
+      Storage.remove(temporaryPathStr.c_str());
+      ok = false;
+      return false;
+    }
     LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes)", cachePathStr.c_str(), width, height,
-            4 + bytesPerRow * height);
+            static_cast<int>(pixelcache::kHeaderSize) + bytesPerRow * height);
     ok = false;  // file handed off; nothing left to clean up
     return true;
   }
@@ -166,8 +196,8 @@ struct PixelCache {
   // Drop a partial/failed cache so a later decode re-creates it cleanly.
   void abort() {
     if (file.isOpen()) file.close();
-    if (!cachePathStr.empty()) {
-      Storage.remove(cachePathStr.c_str());
+    if (!temporaryPathStr.empty()) {
+      Storage.remove(temporaryPathStr.c_str());
     }
     ok = false;
   }

@@ -20,6 +20,7 @@ struct TouchFrame {
   bool down = false;
   bool positionChanged = false;
   std::uint64_t timestampMicros = 0;
+  TouchPoint rawPoint;
 };
 
 class KoboEvdevTouch {

@@ -8,6 +8,7 @@
 #include "OpdsSettingsActivity.h"
 #include "activities/ActivityManager.h"
 #include "activities/browser/OpdsBookBrowserActivity.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -40,6 +41,8 @@ void OpdsServerListActivity::loop() {
     }
     return;
   }
+
+  consumeDirectListSelection(mappedInput, getItemCount(), selectedIndex);
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     handleSelection();

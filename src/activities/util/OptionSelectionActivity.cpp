@@ -38,6 +38,16 @@ void OptionSelectionActivity::onEnter() {
 }
 
 void OptionSelectionActivity::loop() {
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  int directOption = 0;
+  int ignoredCurrent = 0;
+  if (mappedInput.consumeNavigationTouchTarget(directOption, ignoredCurrent) && directOption >= 0 &&
+      directOption < static_cast<int>(options_.size())) {
+    selectedIndex_ = directOption;
+    select();
+    return;
+  }
+#endif
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     mappedInput.suppressNextBackRelease();
     cancel();

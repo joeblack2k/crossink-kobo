@@ -34,7 +34,16 @@
 
 namespace {
 
+// On N437 the kernel owns the final panel power transition. Asking FBInk to
+// power the EPDC down *before* /sys/power/state is written can leave the old
+// 3.0.35 driver in a state where the visible sleep frame is committed but the
+// caller never reaches the actual suspend write. Keep the panel alive until
+// the suspend controller takes over.
+#ifdef KOBO_LINUX
+constexpr bool TURN_OFF_SCREEN_AFTER_SLEEP_REFRESH = false;
+#else
 constexpr bool TURN_OFF_SCREEN_AFTER_SLEEP_REFRESH = true;
+#endif
 constexpr int sleepBuildInfoSideMargin = 20;
 
 bool sleepCoverFilterInvertsGeneratedScreen() {
@@ -515,6 +524,18 @@ void SleepActivity::renderCustomSleepScreen() const {
 void SleepActivity::renderDefaultSleepScreen() const {
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
+
+#ifdef KOBO_LINUX
+  // Kobo's no-book sleep contract is intentionally minimal and stable: the
+  // panel keeps one white frame with a single clear state label. Do not reuse
+  // the ESP splash/logo path here because it makes a normal suspend resemble
+  // a reboot on this device.
+  renderer.clearScreen();
+  renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - renderer.getLineHeight(UI_12_FONT_ID) / 2, "SLEEPING",
+                            true, EpdFontFamily::BOLD);
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH, TURN_OFF_SCREEN_AFTER_SLEEP_REFRESH);
+  return;
+#endif
 
   renderer.clearScreen();
   renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "MappedInputManager.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -52,6 +53,8 @@ void XtcReaderMenuActivity::loop() {
     finish();
     return;
   }
+
+  consumeDirectListSelection(mappedInput, static_cast<int>(items.size()), selectedIndex);
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     setResult(MenuResult{static_cast<int>(items[selectedIndex].action)});

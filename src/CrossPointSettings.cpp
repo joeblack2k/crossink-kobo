@@ -1,5 +1,7 @@
 #include "CrossPointSettings.h"
 
+#include "platform/DeviceCapabilities.h"
+
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
@@ -223,12 +225,23 @@ void applyLegacyFrontButtonLayout(CrossPointSettings& settings) {
 }  // namespace
 
 const char* CrossPointSettings::getDefaultDeviceName() {
-  if (gpio.deviceIsX3()) return "CrossInk X3";
-  if (gpio.deviceIsX4()) return "CrossInk X4";
-  return "CrossInk";
+#ifdef KOBO_LINUX
+  return "Kobo Glo HD";
+#else
+  return crossink::platform::deviceCapabilities(gpio).familyName();
+#endif
 }
 
 const char* CrossPointSettings::getEffectiveDeviceName() const {
+#ifdef KOBO_LINUX
+  // Settings copied from an X4 build used its hardware default as an explicit
+  // name.  Do not present that stale identity on a Kobo, but preserve any
+  // genuinely user-selected name.
+  if (std::strcmp(deviceName, "X4") == 0 || std::strcmp(deviceName, "CrossInk X4") == 0 ||
+      std::strcmp(deviceName, "CrossPoint X4") == 0) {
+    return getDefaultDeviceName();
+  }
+#endif
   return isValidDeviceName(deviceName) ? deviceName : getDefaultDeviceName();
 }
 

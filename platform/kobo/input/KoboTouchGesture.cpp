@@ -17,10 +17,7 @@ TouchAction KoboTouchGesture::actionAt(const TouchPoint point, const TouchContex
     return point.x < screenWidth / 2 ? TouchAction::Back : TouchAction::Confirm;
   }
   if (context != TouchContext::Reader) {
-    // Until an activity-specific hitbox is registered, tapping the upper or
-    // lower half moves the existing focus. The permanent frame remains the
-    // unambiguous Back/Confirm path.
-    return point.y < (screenHeight - kBottomFrameHeight) / 2 ? TouchAction::Up : TouchAction::Down;
+    return TouchAction::UiItem;
   }
   if (point.x < screenWidth * 3 / 10) {
     return TouchAction::PageBack;
@@ -57,7 +54,7 @@ TouchDispatch KoboTouchGesture::update(const TouchFrame& frame, const TouchConte
       heldAction_ = actionAt(start_, context, screenWidth, screenHeight);
       if (heldAction_ != TouchAction::None) {
         longPressActive_ = true;
-        return {heldAction_, true, false};
+        return {heldAction_, true, false, start_};
       }
     }
     return {};
@@ -65,18 +62,18 @@ TouchDispatch KoboTouchGesture::update(const TouchFrame& frame, const TouchConte
 
   TouchDispatch dispatch{};
   if (longPressActive_) {
-    dispatch = {heldAction_, false, true};
+    dispatch = {heldAction_, false, true, start_};
   } else if (withinTapSlop) {
     const TouchAction action = actionAt(start_, context, screenWidth, screenHeight);
-    dispatch = {action, action != TouchAction::None, action != TouchAction::None};
+    dispatch = {action, action != TouchAction::None, action != TouchAction::None, start_};
   } else if (std::abs(deltaX) >= kSwipeDistance && std::abs(deltaX) > std::abs(deltaY)) {
     const TouchAction action = context == TouchContext::Reader
                                    ? (deltaX < 0 ? TouchAction::PageForward : TouchAction::PageBack)
                                    : (deltaX < 0 ? TouchAction::Right : TouchAction::Left);
-    dispatch = {action, true, true};
+    dispatch = {action, true, true, start_};
   } else if (context != TouchContext::Reader && std::abs(deltaY) >= kSwipeDistance) {
     const TouchAction action = deltaY < 0 ? TouchAction::Down : TouchAction::Up;
-    dispatch = {action, true, true};
+    dispatch = {action, true, true, start_};
   }
   reset();
   return dispatch;

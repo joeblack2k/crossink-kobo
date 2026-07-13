@@ -113,6 +113,31 @@ file "$root_dump/usr/bin/crossink-kobo" | grep -q 'ELF 32-bit.*ARM' || {
 	echo 'Validated N437 EPDC firmware absent from p3' >&2
 	exit 1
 }
+[ "$(sha256sum "$root_dump/lib/firmware/cypress/cyfmac43362-sdio.bin" | awk '{print $1}')" = \
+	'24e9c2eb18628f855e8d9453cdef2cf66ba06ee0dcfa9c664adce144e7ca2c5f' ] || {
+	echo 'Pinned BCM43362 firmware absent from p3' >&2
+	exit 1
+}
+[ -L "$root_dump/lib/firmware/brcm/brcmfmac43362-sdio.bin" ] || {
+	echo 'BCM43362 compatibility firmware symlink absent from p3' >&2
+	exit 1
+}
+[ -L "$root_dump/lib/firmware/brcm/brcmfmac43362-sdio.kobo,glo-hd-n437.bin" ] || {
+	echo 'N437 board-specific BCM43362 firmware symlink absent from p3' >&2
+	exit 1
+}
+[ -L "$root_dump/lib/firmware/brcm/brcmfmac43362-sdio.kobo,glo-hd-n437.txt" ] || {
+	echo 'N437 WC121 calibration symlink absent from p3' >&2
+	exit 1
+}
+[ -f "$root_dump/lib/firmware/regulatory.db" ] || {
+	echo 'Wireless regulatory database absent from p3' >&2
+	exit 1
+}
+[ -x "$root_dump/etc/init.d/S25crossink-wifi" ] || {
+	echo 'Wi-Fi driver init service absent from p3' >&2
+	exit 1
+}
 grep -q '^root:\*:' "$root_dump/etc/shadow" || { echo 'Root password is not locked' >&2; exit 1; }
 grep -q '^ssh-ed25519 ' "$root_dump/root/.ssh/authorized_keys" || {
 	echo 'Dedicated public SSH key absent' >&2

@@ -704,6 +704,15 @@ void FileBrowserActivity::toggleHiddenFiles() {
 }
 
 void FileBrowserActivity::loop() {
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  int directEntry = 0;
+  int ignoredCurrent = 0;
+  if (mappedInput.consumeNavigationTouchTarget(directEntry, ignoredCurrent) && directEntry >= 0 &&
+      directEntry < static_cast<int>(entryCount())) {
+    selectorIndex = directEntry;
+    mappedInput.injectRelease(MappedInputManager::Button::Confirm);
+  }
+#endif
   if (pendingCompletedFeedback) {
     const bool timedOut = (millis() - completedFeedbackShowTime) >= COMPLETED_FEEDBACK_MS;
     const bool navPressed = mappedInput.wasReleased(MappedInputManager::Button::Left) ||

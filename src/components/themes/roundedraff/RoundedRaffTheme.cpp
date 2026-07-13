@@ -1,5 +1,9 @@
 #include "RoundedRaffTheme.h"
 
+#ifdef KOBO_LINUX
+#include "components/TouchUiRegistry.h"
+#endif
+
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <HalTiltSensor.h>
@@ -11,6 +15,7 @@
 #include <vector>
 
 #include "RecentBooksStore.h"
+#include "components/KoboIconMetrics.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
@@ -65,14 +70,15 @@ void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const 
     drawTopStatusBarClock(renderer, rect.y, nullptr, readerContext, clockYOffset);
     return;
   }
-  const int sidePadding = RoundedRaffMetrics::values.contentSidePadding;
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int sidePadding = metrics.contentSidePadding;
   const int titleX = rect.x + sidePadding;
   const bool isHomeHeader = rect.height == RoundedRaffMetrics::values.homeTopPadding;
   const int titleY = rect.y + (isHomeHeader ? kHomeHeaderTitleYOffset : kHeaderTitleYOffset);
 
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  const int batteryIconX = rect.x + rect.width - sidePadding - RoundedRaffMetrics::values.batteryWidth;
+  const int batteryIconX = rect.x + rect.width - sidePadding - metrics.batteryWidth;
   const int batteryYOffset = isHomeHeader ? kHomeHeaderBatteryYOffset : kHeaderBatteryYOffset;
   const int batteryY = rect.y + homeHeaderTopInset + batteryYOffset;
 
@@ -83,17 +89,22 @@ void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const 
     const int maxTextWidth = renderer.getTextWidth(SMALL_FONT_ID, "100%");
     batteryGroupLeftX -= maxTextWidth + batteryPercentSpacing;
 
-    const int clearW = maxTextWidth + batteryPercentSpacing + RoundedRaffMetrics::values.batteryWidth;
-    const int clearH = std::max(renderer.getTextHeight(SMALL_FONT_ID), RoundedRaffMetrics::values.batteryHeight + 8);
+    const int clearW = maxTextWidth + batteryPercentSpacing + metrics.batteryWidth;
+    const int clearH = std::max(renderer.getTextHeight(SMALL_FONT_ID), metrics.batteryHeight + 8);
     renderer.fillRect(batteryIconX - maxTextWidth - batteryPercentSpacing, batteryY, clearW, clearH, false);
   }
+
+  const int wifiWidth = wifiIndicatorWidth(metrics);
+  drawWifiIndicator(renderer,
+                    Rect{batteryGroupLeftX - wifiWidth - 4, batteryY, wifiWidth, metrics.batteryHeight});
+  batteryGroupLeftX -= wifiWidth + 4;
 
   const int maxTitleWidth = std::max(0, batteryGroupLeftX - 20 - titleX);
   auto headerTitle = renderer.truncatedText(kTitleFontId, title, maxTitleWidth, EpdFontFamily::BOLD);
   renderer.drawText(kTitleFontId, titleX, titleY, headerTitle.c_str(), true, EpdFontFamily::BOLD);
   drawBatteryRight(
       renderer,
-      Rect{batteryIconX, batteryY, RoundedRaffMetrics::values.batteryWidth, RoundedRaffMetrics::values.batteryHeight},
+      Rect{batteryIconX, batteryY, metrics.batteryWidth, metrics.batteryHeight},
       showBatteryPercentage);
   drawTopStatusBarClock(renderer, rect.y, nullptr, readerContext, readerContext ? 0 : kHeaderClockYOffset);
 }
@@ -112,6 +123,9 @@ void RoundedRaffTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const 
     const int slotX = rect.x + (i * rect.width) / tabCount;
     const int nextSlotX = rect.x + ((i + 1) * rect.width) / tabCount;
     const int slotWidth = nextSlotX - slotX;
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerDirect(slotX, rect.y, slotWidth, rect.height, TouchUiRegistry::TargetKind::Tab, i);
+#endif
     const int tabInsetX = std::min(kTabHorizontalInset, slotWidth / 2);
     const int tabX = slotX + tabInsetX;
     const int tabWidth = std::max(0, slotWidth - tabInsetX * 2);
@@ -193,7 +207,13 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
         // Render empty cover
         renderer.fillRect(tileX + (tileWidth - coverWidth) / 2, imgY + (RoundedRaffMetrics::values.homeCoverHeight / 3),
                           coverWidth, 2 * RoundedRaffMetrics::values.homeCoverHeight / 3, true);
-        renderer.drawIcon(CoverIcon, tileX + (tileWidth - coverWidth) / 2 + 24, imgY + 24, 32);
+        constexpr int sourceIconSize = 32;
+        const auto& metrics = UITheme::getInstance().getMetrics();
+        const int iconSize = KoboIconMetrics::coverPlaceholderSize(sourceIconSize, coverWidth, metrics.homeCoverHeight);
+        KoboIconMetrics::drawScaledSquare(renderer, CoverIcon,
+                                          tileX + (tileWidth - iconSize) / 2,
+                                          imgY + (metrics.homeCoverHeight / 3 - iconSize) / 2,
+                                          sourceIconSize, iconSize);
         renderer.maskRoundedRectOutsideCorners(tileX + (tileWidth - coverWidth) / 2, imgY, coverWidth,
                                                RoundedRaffMetrics::values.homeCoverHeight, kCoverRadius,
                                                Color::LightGray);
@@ -244,6 +264,9 @@ void RoundedRaffTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int butt
     const std::string truncatedLabel = renderer.truncatedText(kTitleFontId, label, maxLabelWidth, EpdFontFamily::BOLD);
     const int rowWidth = std::min(
         menuMaxWidth, renderer.getTextWidth(kTitleFontId, truncatedLabel.c_str(), EpdFontFamily::BOLD) + kRowPaddingX);
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerItem(rowX, rowY, std::max(rowWidth, menuMaxWidth), rowHeight, selectedIndex, i, buttonCount);
+#endif
     const bool isSelected = selectedIndex == i;
     renderer.fillRoundedRect(rowX, rowY, rowWidth, rowHeight, kMenuRadius, isSelected ? Color::Black : Color::White);
     const int textY = rowY + (rowHeight - textLineHeight) / 2;
@@ -403,6 +426,10 @@ void RoundedRaffTheme::drawList(const GfxRenderer& renderer, Rect rect, int item
       renderer.drawLine(rowX, rowY + currentRowHeight - 1, rowX + rowWidth, rowY + currentRowHeight - 1, true);
       continue;
     }
+
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerItem(rowX, rowY, rowWidth, currentRowHeight, selectedIndex, i, itemCount);
+#endif
 
     renderer.fillRoundedRect(rowX, rowY, rowWidth, currentRowHeight, kRowRadius,
                              isSelected ? Color::Black : Color::White);

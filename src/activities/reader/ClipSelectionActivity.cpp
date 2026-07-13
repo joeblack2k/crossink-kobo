@@ -12,6 +12,7 @@
 #include "ReaderUtils.h"
 #include "activities/ActivityResult.h"
 #include "clippings/ClipTextBuilder.h"
+#include "components/TouchUiRegistry.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -169,6 +170,47 @@ void ClipSelectionActivity::loop() {
     requestUpdate();
   };
 
+  const auto finishSelection = [this, total]() {
+    const int from = std::min(startMarkIdx, cursorIdx);
+    const int to = std::max(startMarkIdx, cursorIdx);
+    auto result = ClipTextBuilder::build(words, readingOrder, from, to, total, startPageInSection, section.pageCount);
+    if (const auto paragraphIndex = section.getParagraphIndexForPage(result.sectionPage)) {
+      result.paragraphIndex = *paragraphIndex;
+    }
+    setResult(std::move(result));
+    finish();
+  };
+
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  MappedInputManager::TouchTarget touchTarget;
+  if (mappedInput.consumeTouchTarget(touchTarget) &&
+      touchTarget.kind == static_cast<unsigned char>(TouchUiRegistry::TargetKind::TextSelectionSurface)) {
+    // Do not snap whitespace to an arbitrary word.  A direct range is only
+    // started or completed when the finger actually lands on a visible word,
+    // with a small physical tolerance for an e-ink finger target.
+    constexpr int kTouchPadding = 12;
+    int tappedOrderIndex = -1;
+    for (int orderIndex = 0; orderIndex < total; ++orderIndex) {
+      const WordRef& word = words[readingOrder[orderIndex]];
+      if (touchTarget.x >= word.x - kTouchPadding && touchTarget.x < word.x + word.w + kTouchPadding &&
+          touchTarget.y >= word.y - kTouchPadding && touchTarget.y < word.y + word.h + kTouchPadding) {
+        tappedOrderIndex = orderIndex;
+        break;
+      }
+    }
+    if (tappedOrderIndex >= 0) {
+      moveCursor(tappedOrderIndex);
+      if (startMarkIdx == -1) {
+        startMarkIdx = tappedOrderIndex;
+        requestUpdate();
+      } else {
+        finishSelection();
+      }
+      return;
+    }
+  }
+#endif
+
   buttonNavigator.onRelease({Button::Left}, [this, &moveCursor] {
     if (cursorIdx > 0) moveCursor(cursorIdx - 1);
   });
@@ -191,14 +233,7 @@ void ClipSelectionActivity::loop() {
       startMarkIdx = cursorIdx;
       requestUpdate();
     } else {
-      const int from = std::min(startMarkIdx, cursorIdx);
-      const int to = std::max(startMarkIdx, cursorIdx);
-      auto result = ClipTextBuilder::build(words, readingOrder, from, to, total, startPageInSection, section.pageCount);
-      if (const auto paragraphIndex = section.getParagraphIndexForPage(result.sectionPage)) {
-        result.paragraphIndex = *paragraphIndex;
-      }
-      setResult(std::move(result));
-      finish();
+      finishSelection();
     }
     return;
   }
@@ -232,6 +267,16 @@ void ClipSelectionActivity::render(RenderLock&&) {
     if (!switchToPage(currentDisplayPage)) return;
   }
   drawHighlights();
+
+#ifdef KOBO_LINUX
+  // One surface transports the actual touch coordinates to this activity.
+  // Registering every word separately would exceed the fixed registry on
+  // dense EPUB pages; the activity performs the exact word hit-test above.
+  constexpr int kKoboTouchFrameHeight = 96;
+  TOUCH_UI.registerDirect(0, 0, renderer.getScreenWidth(),
+                          std::max(1, renderer.getScreenHeight() - kKoboTouchFrameHeight),
+                          TouchUiRegistry::TargetKind::TextSelectionSurface, 0);
+#endif
 
   const auto confirmLabel = startMarkIdx == -1 ? tr(STR_SELECT) : tr(STR_DONE);
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));

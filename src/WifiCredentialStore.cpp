@@ -8,6 +8,10 @@
 #include <algorithm>
 #include <utility>
 
+#ifdef KOBO_LINUX
+#include <sys/stat.h>
+#endif
+
 namespace {
 constexpr uint8_t WIFI_FILE_VERSION = 2;
 constexpr char WIFI_FILE_BIN[] = "/.crosspoint/wifi.bin";
@@ -19,6 +23,17 @@ void legacyDeobfuscate(std::string& data) {
   for (size_t i = 0; i < data.size(); i++) {
     data[i] ^= LEGACY_OBFUSCATION_KEY[i % LEGACY_KEY_LENGTH];
   }
+}
+
+bool secureSavedCredentials(const bool saved) {
+  if (!saved) return false;
+#ifdef KOBO_LINUX
+  // HalStorage maps firmware paths onto /data for the Kobo POSIX backend.
+  // Obfuscation is not encryption, so filesystem permissions are mandatory.
+  if (::chmod("/data/.crosspoint/wifi.json", S_IRUSR | S_IWUSR) != 0) return false;
+  (void)::chmod("/data/.crosspoint/wifi.json.bak", S_IRUSR | S_IWUSR);
+#endif
+  return true;
 }
 }  // namespace
 
@@ -73,7 +88,7 @@ bool WifiCredentialStore::fromJson(JsonVariantConst doc) {
 
   if (needsResave) {
     LOG_DBG("WCS", "Resaving JSON with obfuscated passwords");
-    saveToFile();
+    secureSavedCredentials(saveToFile());
   }
 
   return true;
@@ -89,7 +104,7 @@ bool WifiCredentialStore::loadFromFile() {
   }
 
   if (Storage.exists(WIFI_FILE_BIN) && loadFromBinaryFile()) {
-    if (saveToFile()) {
+    if (secureSavedCredentials(saveToFile())) {
       Storage.rename(WIFI_FILE_BIN, WIFI_FILE_BAK);
       LOG_DBG("WCS", "Migrated wifi.bin to wifi.json");
       return true;
@@ -142,7 +157,7 @@ bool WifiCredentialStore::addCredential(const std::string& ssid, const std::stri
   if (cred != credentials.end()) {
     cred->password = password;
     LOG_DBG("WCS", "Updated credentials for: %s", ssid.c_str());
-    return saveToFile();
+    return secureSavedCredentials(saveToFile());
   }
 
   // Check if we've reached the limit
@@ -154,7 +169,7 @@ bool WifiCredentialStore::addCredential(const std::string& ssid, const std::stri
   // Add new credential
   credentials.push_back({ssid, password});
   LOG_DBG("WCS", "Added credentials for: %s", ssid.c_str());
-  return saveToFile();
+  return secureSavedCredentials(saveToFile());
 }
 
 bool WifiCredentialStore::removeCredential(const std::string& ssid) {
@@ -166,7 +181,7 @@ bool WifiCredentialStore::removeCredential(const std::string& ssid) {
     if (ssid == lastConnectedSsid) {
       clearLastConnectedSsid();
     }
-    return saveToFile();
+    return secureSavedCredentials(saveToFile());
   }
   return false;  // Not found
 }
@@ -187,7 +202,7 @@ bool WifiCredentialStore::hasSavedCredential(const std::string& ssid) const { re
 void WifiCredentialStore::setLastConnectedSsid(const std::string& ssid) {
   if (lastConnectedSsid != ssid) {
     lastConnectedSsid = ssid;
-    saveToFile();
+    secureSavedCredentials(saveToFile());
   }
 }
 
@@ -196,13 +211,13 @@ const std::string& WifiCredentialStore::getLastConnectedSsid() const { return la
 void WifiCredentialStore::clearLastConnectedSsid() {
   if (!lastConnectedSsid.empty()) {
     lastConnectedSsid.clear();
-    saveToFile();
+    secureSavedCredentials(saveToFile());
   }
 }
 
 void WifiCredentialStore::clearAll() {
   credentials.clear();
   lastConnectedSsid.clear();
-  saveToFile();
+  secureSavedCredentials(saveToFile());
   LOG_DBG("WCS", "Cleared all WiFi credentials");
 }

@@ -11,7 +11,7 @@
 
 namespace {
 constexpr uint32_t BOOK_CACHE_MAGIC = 0x425843FF;  // bytes: 0xFF, "CXB"
-constexpr uint8_t BOOK_CACHE_VERSION = 8;          // v8: TOC/book titles stored NFC-composed
+constexpr uint8_t BOOK_CACHE_VERSION = 9;          // v9: persistent series/collection metadata for Kobo library views
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
@@ -137,8 +137,9 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   constexpr uint32_t headerASize = sizeof(BOOK_CACHE_MAGIC) + sizeof(BOOK_CACHE_VERSION) +
                                    /* LUT Offset */ sizeof(uint32_t) + sizeof(spineCount) + sizeof(tocCount);
   const uint32_t metadataSize = metadata.title.size() + metadata.author.size() + metadata.language.size() +
+                                metadata.series.size() + metadata.seriesIndex.size() + metadata.collection.size() +
                                 metadata.coverItemHref.size() + metadata.textReferenceHref.size() +
-                                sizeof(uint32_t) * 5;
+                                sizeof(uint32_t) * 8;
   const uint32_t lutSize = sizeof(uint32_t) * spineCount + sizeof(uint32_t) * tocCount;
   const uint32_t lutOffset = headerASize + metadataSize;
 
@@ -152,6 +153,9 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   serialization::writeString(bookFile, metadata.title);
   serialization::writeString(bookFile, metadata.author);
   serialization::writeString(bookFile, metadata.language);
+  serialization::writeString(bookFile, metadata.series);
+  serialization::writeString(bookFile, metadata.seriesIndex);
+  serialization::writeString(bookFile, metadata.collection);
   serialization::writeString(bookFile, metadata.coverItemHref);
   serialization::writeString(bookFile, metadata.textReferenceHref);
 
@@ -455,6 +459,9 @@ bool BookMetadataCache::load() {
       !serialization::tryReadPod(bookFile, tocCount) || !serialization::tryReadString(bookFile, coreMetadata.title) ||
       !serialization::tryReadString(bookFile, coreMetadata.author) ||
       !serialization::tryReadString(bookFile, coreMetadata.language) ||
+      !serialization::tryReadString(bookFile, coreMetadata.series) ||
+      !serialization::tryReadString(bookFile, coreMetadata.seriesIndex) ||
+      !serialization::tryReadString(bookFile, coreMetadata.collection) ||
       !serialization::tryReadString(bookFile, coreMetadata.coverItemHref) ||
       !serialization::tryReadString(bookFile, coreMetadata.textReferenceHref)) {
     LOG_DBG("BMC", "Cache metadata is truncated");

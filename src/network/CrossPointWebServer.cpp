@@ -26,6 +26,7 @@
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
+#include "platform/DeviceCapabilities.h"
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
@@ -141,12 +142,19 @@ void CrossPointWebServer::begin() {
     return;
   }
 
-  // Check if we have a valid network connection (either STA connected or AP mode)
+  // Check if we have a valid network connection (either STA connected or AP
+  // mode).  On Kobo, the development/final USB gadget is a third supported
+  // transport and is intentionally available even while WLAN is off.
   const wifi_mode_t wifiMode = WiFi.getMode();
   const bool isStaConnected = (wifiMode & WIFI_MODE_STA) && (WiFi.status() == WL_CONNECTED);
   const bool isInApMode = (wifiMode & WIFI_MODE_AP) && (WiFi.softAPgetStationNum() >= 0);  // AP is running
+#ifdef KOBO_LINUX
+  constexpr bool isKoboUsbNetwork = true;
+#else
+  constexpr bool isKoboUsbNetwork = false;
+#endif
 
-  if (!isStaConnected && !isInApMode) {
+  if (!isStaConnected && !isInApMode && !isKoboUsbNetwork) {
     LOG_DBG("WEB", "Cannot start webserver - no valid network (mode=%d, status=%d)", wifiMode, WiFi.status());
     return;
   }
@@ -219,6 +227,7 @@ void CrossPointWebServer::begin() {
   server->on("/api/opds", HTTP_GET, [this] { handleGetOpdsServers(); });
   server->on("/api/opds", HTTP_POST, [this] { handlePostOpdsServer(); });
   server->on("/api/opds/delete", HTTP_POST, [this] { handleDeleteOpdsServer(); });
+  server->on("/api/opds/primary", HTTP_POST, [this] { handleMakePrimaryOpdsServer(); });
 
   // Wi-Fi credential endpoints
   server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
@@ -432,7 +441,7 @@ void CrossPointWebServer::handleStatus() const {
   doc["rssi"] = apMode ? 0 : WiFi.RSSI();
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["uptime"] = millis() / 1000;
-  doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
+  doc["device"] = crossink::platform::deviceCapabilities(gpio).familyName();
 
   char snBuf[33] = {0};
   bool valid = false;
@@ -694,7 +703,13 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     totalWriteTime = 0;
     writeCount = 0;
 
-    // Get upload path from query parameter (defaults to root if not specified)
+    // Get upload path from query parameter. Kobo's browser-facing upload is
+    // deliberately limited to the Books directory; the application owns all
+    // metadata/cache paths outside it.
+#ifdef KOBO_LINUX
+    state.path = "/Books";
+#else
+    // ESP compatibility keeps the historical root default.
     // Note: We use query parameter instead of form data because multipart form
     // fields aren't available until after file upload completes
     if (server->hasArg("path")) {
@@ -702,11 +717,12 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     } else {
       state.path = "/";
     }
+#endif
 
     LOG_DBG("WEB", "[UPLOAD] START: %s to path: %s", state.fileName.c_str(), state.path.c_str());
     LOG_DBG("WEB", "[UPLOAD] Free heap: %d bytes", ESP.getFreeHeap());
 
-    // Create file path
+    // Create file path.
     String filePath = state.path;
     if (!filePath.endsWith("/")) filePath += "/";
     filePath += state.fileName;
@@ -717,24 +733,35 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       return;
     }
 
-    // Check if file already exists - SD operations can be slow
+#ifdef KOBO_LINUX
+    if (!FsHelpers::hasEpubExtension(state.fileName.c_str())) {
+      state.error = "Only EPUB files can be uploaded";
+      LOG_DBG("WEB", "[UPLOAD] FAILED: non-EPUB Kobo upload: %s", state.fileName.c_str());
+      return;
+    }
+#endif
+
+    state.targetPath = filePath;
+    state.temporaryPath = filePath + ".part";
+
+    // Never truncate an existing book while a transfer is still in progress.
+    // A same-directory rename below makes activation atomic on the Kobo's
+    // ext filesystem. Clean a stale interrupted stream first.
     esp_task_wdt_reset();
-    if (Storage.exists(filePath.c_str())) {
-      LOG_DBG("WEB", "[UPLOAD] Overwriting existing file: %s", filePath.c_str());
-      esp_task_wdt_reset();
-      Storage.remove(filePath.c_str());
+    if (Storage.exists(state.temporaryPath.c_str())) {
+      Storage.remove(state.temporaryPath.c_str());
     }
 
-    // Open file for writing - this can be slow due to FAT cluster allocation
+    // Open the staging file for writing.
     esp_task_wdt_reset();
-    if (!Storage.openFileForWrite("WEB", filePath, state.file)) {
+    if (!Storage.openFileForWrite("WEB", state.temporaryPath, state.file)) {
       state.error = "Failed to create file on SD card";
-      LOG_DBG("WEB", "[UPLOAD] FAILED to create file: %s", filePath.c_str());
+      LOG_DBG("WEB", "[UPLOAD] FAILED to create staging file: %s", state.temporaryPath.c_str());
       return;
     }
     esp_task_wdt_reset();
 
-    LOG_DBG("WEB", "[UPLOAD] File created successfully: %s", filePath.c_str());
+    LOG_DBG("WEB", "[UPLOAD] Staging file created: %s", state.temporaryPath.c_str());
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     if (state.file && state.error.isEmpty()) {
       // Buffer incoming data and flush when buffer is full
@@ -778,10 +805,21 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       if (!flushUploadBuffer(state)) {
         state.error = "Failed to write final data to SD card";
       }
+      if (!state.file.sync()) {
+        state.error = "Failed to sync upload to storage";
+      }
       state.file.close();
 
       if (state.error.isEmpty()) {
-        state.success = true;
+        if (!Storage.rename(state.temporaryPath.c_str(), state.targetPath.c_str())) {
+          state.error = "Failed to activate uploaded file";
+          Storage.remove(state.temporaryPath.c_str());
+        } else {
+          state.success = true;
+        }
+      }
+
+      if (state.success) {
         const unsigned long elapsed = millis() - uploadStartTime;
         const float avgKbps = (elapsed > 0) ? (state.size / 1024.0) / (elapsed / 1000.0) : 0;
         const float writePercent = (elapsed > 0) ? (totalWriteTime * 100.0 / elapsed) : 0;
@@ -791,21 +829,16 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
                 writePercent);
 
         // Clear epub cache to prevent stale metadata issues when overwriting files
-        String filePath = state.path;
-        if (!filePath.endsWith("/")) filePath += "/";
-        filePath += state.fileName;
-        clearBookCachePreservingUserState(filePath.c_str());
+        clearBookCachePreservingUserState(state.targetPath.c_str());
       }
     }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     state.bufferPos = 0;  // Discard buffered data
     if (state.file) {
       state.file.close();
-      // Try to delete the incomplete file
-      String filePath = state.path;
-      if (!filePath.endsWith("/")) filePath += "/";
-      filePath += state.fileName;
-      Storage.remove(filePath.c_str());
+      // Delete only the incomplete staging file; an older destination remains
+      // readable after an aborted replacement upload.
+      Storage.remove(state.temporaryPath.c_str());
     }
     state.error = "Upload aborted";
     LOG_DBG("WEB", "Upload aborted");
@@ -1339,11 +1372,14 @@ void CrossPointWebServer::handleGetOpdsServers() const {
 
   for (size_t i = 0; i < servers.size(); i++) {
     doc.clear();
+    doc["id"] = servers[i].id;
     doc["index"] = i;
     doc["name"] = servers[i].name;
     doc["url"] = servers[i].url;
     doc["username"] = servers[i].username;
     doc["filenameFormat"] = opdsFilenameFormatToJson(servers[i].filenameFormat);
+    doc["syncAllBooks"] = servers[i].syncAllBooks;
+    doc["primary"] = i == 0;
     // Never expose passwords over the API — only indicate whether one is set
     doc["hasPassword"] = !servers[i].password.empty();
 
@@ -1378,6 +1414,7 @@ void CrossPointWebServer::handlePostOpdsServer() {
   opdsServer.url = doc["url"] | std::string("");
   opdsServer.username = doc["username"] | std::string("");
   opdsServer.filenameFormat = opdsFilenameFormatFromJson(doc["filenameFormat"] | "");
+  opdsServer.syncAllBooks = doc["syncAllBooks"] | false;
 
   // The password field is optional in the JSON payload. When absent (vs. present but empty),
   // we preserve the existing password — the web UI omits it when the user hasn't changed it.
@@ -1386,13 +1423,19 @@ void CrossPointWebServer::handlePostOpdsServer() {
   const bool hasFilenameFormatField =
       doc["filenameFormat"].is<const char*>() || doc["filenameFormat"].is<std::string>();
 
-  if (doc["index"].is<int>()) {
-    int idx = doc["index"].as<int>();
-    if (idx < 0 || idx >= static_cast<int>(OPDS_STORE.getCount())) {
-      server->send(400, "text/plain", "Invalid server index");
+  size_t serverIndex = OPDS_STORE.getCount();
+  if (doc["id"].is<const char*>()) {
+    serverIndex = OPDS_STORE.indexForId(doc["id"].as<const char*>());
+  } else if (doc["index"].is<int>()) {
+    const int index = doc["index"].as<int>();
+    if (index >= 0) serverIndex = static_cast<size_t>(index);
+  }
+  if (serverIndex < OPDS_STORE.getCount()) {
+    const auto* existing = OPDS_STORE.getServer(serverIndex);
+    if (!existing) {
+      server->send(400, "text/plain", "Unknown OPDS server");
       return;
     }
-    const auto* existing = OPDS_STORE.getServer(static_cast<size_t>(idx));
     // Preserve existing values for fields older clients do not know how to send.
     if (existing && !hasPasswordField) {
       password = existing->password;
@@ -1401,9 +1444,16 @@ void CrossPointWebServer::handlePostOpdsServer() {
       opdsServer.filenameFormat = existing->filenameFormat;
     }
     opdsServer.password = password;
-    OPDS_STORE.updateServer(static_cast<size_t>(idx), opdsServer);
-    LOG_DBG("WEB", "Updated OPDS server at index %d", idx);
+    if (!OPDS_STORE.updateServer(serverIndex, opdsServer)) {
+      server->send(500, "text/plain", "Could not save OPDS server");
+      return;
+    }
+    LOG_DBG("WEB", "Updated OPDS server %s", existing->id.c_str());
   } else {
+    if (doc["id"].is<const char*>() || doc["index"].is<int>()) {
+      server->send(400, "text/plain", "Unknown OPDS server");
+      return;
+    }
     opdsServer.password = password;
     if (!OPDS_STORE.addServer(opdsServer)) {
       server->send(400, "text/plain", "Cannot add server (limit reached)");
@@ -1430,19 +1480,47 @@ void CrossPointWebServer::handleDeleteOpdsServer() {
     return;
   }
 
-  if (!doc["index"].is<int>()) {
-    server->send(400, "text/plain", "Missing index");
+  size_t serverIndex = OPDS_STORE.getCount();
+  if (doc["id"].is<const char*>()) {
+    serverIndex = OPDS_STORE.indexForId(doc["id"].as<const char*>());
+  } else if (doc["index"].is<int>()) {
+    const int index = doc["index"].as<int>();
+    if (index >= 0) serverIndex = static_cast<size_t>(index);
+  }
+  if (serverIndex >= OPDS_STORE.getCount()) {
+    server->send(400, "text/plain", "Unknown OPDS server");
     return;
   }
 
-  int idx = doc["index"].as<int>();
-  if (idx < 0 || idx >= static_cast<int>(OPDS_STORE.getCount())) {
-    server->send(400, "text/plain", "Invalid server index");
+  if (!OPDS_STORE.removeServer(serverIndex)) {
+    server->send(500, "text/plain", "Could not remove OPDS server");
     return;
   }
+  LOG_DBG("WEB", "Deleted OPDS server");
+  server->send(200, "text/plain", "OK");
+}
 
-  OPDS_STORE.removeServer(static_cast<size_t>(idx));
-  LOG_DBG("WEB", "Deleted OPDS server at index %d", idx);
+void CrossPointWebServer::handleMakePrimaryOpdsServer() {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+  JsonDocument doc;
+  const DeserializationError error = deserializeJson(doc, server->arg("plain"));
+  if (error || !doc["id"].is<const char*>()) {
+    server->send(400, "text/plain", "Missing OPDS server id");
+    return;
+  }
+  const size_t serverIndex = OPDS_STORE.indexForId(doc["id"].as<const char*>());
+  if (serverIndex >= OPDS_STORE.getCount()) {
+    server->send(400, "text/plain", "Unknown OPDS server");
+    return;
+  }
+  if (!OPDS_STORE.makePrimary(serverIndex)) {
+    server->send(500, "text/plain", "Could not save primary OPDS server");
+    return;
+  }
+  LOG_DBG("WEB", "Set primary OPDS server");
   server->send(200, "text/plain", "OK");
 }
 

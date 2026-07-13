@@ -1,13 +1,13 @@
 #include "KOReaderSyncClient.h"
 
 #include <ArduinoJson.h>
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
 #include <ArduinoJsonStringCompat.h>
 #endif
 #include <HTTPClient.h>
 #include <I18n.h>
 #include <Logging.h>
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #else
@@ -36,7 +36,7 @@ std::string formatHttpStatusMessage(int httpCode) {
 }
 
 std::string networkErrorMessage() {
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
   switch (KOReaderSyncClient::lastTransportError) {
     case HTTPC_ERROR_CONNECTION_REFUSED:
     case HTTPC_ERROR_NOT_CONNECTED:
@@ -125,7 +125,7 @@ KOReaderSyncClient::Error validateAuthResponse(const char* body) {
 // contiguous block) because the failure mode is aggregate exhaustion, not one large alloc.
 constexpr uint32_t MIN_HEAP_FOR_TLS = 55000;
 
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
 void addAuthHeaders(HTTPClient& http) {
   http.addHeader("Accept", "application/vnd.koreader.v1+json");
   http.addHeader("x-auth-user", KOREADER_STORE.getUsername().c_str());
@@ -229,7 +229,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
     return LOW_MEMORY;
   }
 
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
   HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
   WiFiClient plainClient;
@@ -303,7 +303,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
     return LOW_MEMORY;
   }
 
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
   HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
   WiFiClient plainClient;
@@ -427,7 +427,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
 
   LOG_DBG("KOSync", "Request body: %s", body.c_str());
 
-#ifdef SIMULATOR
+#if defined(SIMULATOR) || defined(CROSSPOINT_POSIX)
   HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
   WiFiClient plainClient;

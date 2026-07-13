@@ -99,6 +99,8 @@ class HomeActivity final : public Activity {
   bool canSwapHomeBook() const;
   void showNextRecentBookOnHome();
   void updateHighlightedBookContext();
+  void registerCurrentBookTouchTarget();
+  void openCurrentBookFromTouch();
   void loadRecentBooks(int maxBooks);
   void loadAllBookStats();
   void loadRecentCovers(int coverHeight);
@@ -111,5 +113,6 @@ class HomeActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool requiresCleanRefreshOnEntry() const override { return true; }
   std::string getCurrentBookPath() const override;
 };

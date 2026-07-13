@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <xf86drmMode.h>
+
 #include <cstddef>
 #include <cstdint>
 
-#include <xf86drmMode.h>
-
 #include "KoboFbInkDisplay.h"
+#include "KoboRefreshScheduler.h"
 
 namespace crossink::kobo {
 
@@ -24,11 +25,14 @@ class KoboDrmDisplay {
   [[nodiscard]] bool isOpen() const { return fd_ >= 0; }
   [[nodiscard]] int lastError() const { return lastError_; }
   bool presentPackedMono(const std::uint8_t* packed, std::size_t packedSize, RefreshKind kind);
+  bool presentPackedMono(const std::uint8_t* packed, std::size_t packedSize, RefreshKind kind,
+                         const RefreshRegion& region);
 
  private:
   bool selectOutput();
   bool createBuffer();
-  bool requestRefresh(RefreshKind kind);
+  bool requestRefresh(RefreshKind kind, const RefreshRegion& region);
+  void copyRegion(const std::uint8_t* packed, const RefreshRegion& region);
   void destroyBuffer();
 
   int fd_ = -1;

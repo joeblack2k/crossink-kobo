@@ -1,0 +1,6 @@
+# Kobo target-only temporary compatibility exceptions.
+#
+# Format: repository-relative path | concrete temporary reason
+# Every listed file is printed by audit-kobo-dependencies.py.  It must be
+# removed when the dependency is replaced, never silently broadened.
+vendor/crosspoint-simulator/src/WebServer.h | Temporary POSIX transfer-server ABI reused by the patched native server; replace as part of PLAT-01 vendor extraction.

@@ -55,6 +55,7 @@ class PageImage final : public PageElement {
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
   static std::unique_ptr<PageImage> deserialize(FsFile& file);
+  ImageBlock& getImageBlock() { return *imageBlock; }
   const ImageBlock& getImageBlock() const { return *imageBlock; }
 };
 
@@ -171,6 +172,12 @@ class Page {
     return std::any_of(elements.begin(), elements.end(),
                        [](const std::shared_ptr<PageElement>& el) { return el->getTag() == TAG_PageImage; });
   }
+
+  // A page with exactly one image is a leaf of the reading flow (cover,
+  // illustration plate, map, ...).  Fit that image into the complete reader
+  // viewport and centre it.  Inline images or image+text pages deliberately
+  // do not take this path: their EPUB/CSS layout remains authoritative.
+  bool fitSingleImageToViewport(uint16_t viewportWidth, uint16_t viewportHeight);
 
   // Get bounding box of all images on the page (union of image rects)
   // Returns false if no images. Coordinates are relative to page origin.

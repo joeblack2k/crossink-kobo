@@ -37,6 +37,10 @@ class CrossPointWebServerActivity final : public Activity {
   // Network mode
   NetworkMode networkMode = NetworkMode::JOIN_NETWORK;
   bool isApMode = false;
+  // The Kobo development/final USB-gadget network is already available when
+  // this activity is opened.  Its HTTP listener is useful without bringing
+  // up WLAN or an open hotspot.
+  bool koboUsbTransfer = false;
 
   // Web server - owned by this activity
   std::unique_ptr<CrossPointWebServer> webServer;
@@ -80,6 +84,18 @@ class CrossPointWebServerActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
-  bool skipLoopDelay() override { return webServer && webServer->isRunning(); }
-  bool preventAutoSleep() override { return webServer && webServer->isRunning(); }
+  bool skipLoopDelay() override {
+#ifdef KOBO_LINUX
+    return koboUsbTransfer && state == WebServerActivityState::SERVER_RUNNING;
+#else
+    return webServer && webServer->isRunning();
+#endif
+  }
+  bool preventAutoSleep() override {
+#ifdef KOBO_LINUX
+    return false;
+#else
+    return webServer && webServer->isRunning();
+#endif
+  }
 };

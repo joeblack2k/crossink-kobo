@@ -13,6 +13,16 @@
 // ImageBlock::render() already validates this before entering the pixel loop,
 // and the JPEG/PNG callbacks pre-clamp destination ranges to screen bounds.
 struct DirectPixelWriter {
+#if defined(KOBO_LINUX)
+  // The N437 framebuffer is physically landscape while reader coordinates are
+  // portrait.  The ESP-oriented fast writer below relies on direct physical
+  // addressing; retaining it here would duplicate the most fragile transform
+  // in the port.  Keep the decoder call sites identical, but delegate Kobo
+  // pixels to GfxRenderer so its single, bounds-checked transform is used by
+  // the first decode as well as later cache renders.
+  GfxRenderer* renderer = nullptr;
+  int logicalY = 0;
+#else
   uint8_t* fb;
   GfxRenderer::RenderMode mode;
   uint16_t displayWidthBytes;  // Runtime framebuffer stride (X4: 100, X3: 99)
@@ -32,8 +42,13 @@ struct DirectPixelWriter {
 
   // Row-precomputed: the Y-dependent portion of the physical coords
   int rowPhyXBase, rowPhyYBase;
+#endif
 
-  void init(GfxRenderer& renderer) {
+  void init(GfxRenderer& targetRenderer) {
+#if defined(KOBO_LINUX)
+    renderer = &targetRenderer;
+#else
+    GfxRenderer& renderer = targetRenderer;
     fb = renderer.getWriteTarget();
     originY = renderer.getWriteOriginY();
     clipRows = renderer.getWriteRows();
@@ -90,13 +105,18 @@ struct DirectPixelWriter {
         phyYStepY = 1;
         break;
     }
+#endif
   }
 
   // Call once per row before the column loop.
   // Pre-computes the Y-dependent portion so writePixel() only needs the X part.
   inline void beginRow(int logicalY) {
+#if defined(KOBO_LINUX)
+    this->logicalY = logicalY;
+#else
     rowPhyXBase = phyXBase + logicalY * phyXStepY;
     rowPhyYBase = phyYBase + logicalY * phyYStepY;
+#endif
   }
 
   // Write a single 2-bit dithered pixel value to the framebuffer.
@@ -104,9 +124,15 @@ struct DirectPixelWriter {
   // No bounds checking — caller guarantees coordinates are valid.
   inline void writePixel(int logicalX, uint8_t pixelValue) const {
     // Determine whether to draw based on render mode
+#if defined(KOBO_LINUX)
+    if (renderer == nullptr) return;
+    const GfxRenderer::RenderMode renderMode = renderer->getRenderMode();
+#else
+    const GfxRenderer::RenderMode renderMode = mode;
+#endif
     bool draw;
     bool state;
-    switch (mode) {
+    switch (renderMode) {
       case GfxRenderer::BW:
         draw = (pixelValue < 3);
         state = true;
@@ -125,6 +151,9 @@ struct DirectPixelWriter {
 
     if (!draw) return;
 
+#if defined(KOBO_LINUX)
+    if (renderer != nullptr) renderer->drawPixel(logicalX, logicalY, state);
+#else
     const int phyX = rowPhyXBase + logicalX * phyXStepX;
     const int phyY = rowPhyYBase + logicalX * phyYStepX;
 
@@ -141,6 +170,7 @@ struct DirectPixelWriter {
     } else {
       fb[byteIndex] |= bitMask;  // Set bit (draw white)
     }
+#endif
   }
 };
 

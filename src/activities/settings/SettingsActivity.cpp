@@ -16,14 +16,19 @@
 #include "ClockOffsetActivity.h"
 #include "ClockSyncActivity.h"
 #include "CrossPointSettings.h"
+#include "DeviceInfoActivity.h"
 #include "FontDownloadActivity.h"
 #include "FontSelectionActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "MappedInputManager.h"
 #include "OpdsServerListActivity.h"
+#ifndef KOBO_LINUX
 #include "OtaUpdateActivity.h"
+#endif
 #include "SdCardFontSystem.h"
+#ifndef KOBO_LINUX
 #include "SdFirmwareUpdateActivity.h"
+#endif
 #include "SettingsList.h"
 #include "StatusBarSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -33,8 +38,14 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "activities/util/OptionSelectionActivity.h"
 #include "components/CompactHeader.h"
+#include "components/TouchUiRegistry.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+#ifdef KOBO_LINUX
+#include <KoboWebTransferService.h>
+void applyKoboUiFontScale(GfxRenderer& target);
+#endif
 
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
                                                               StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
@@ -45,7 +56,14 @@ constexpr int systemVersionFooterBottomInset = 15;
 constexpr size_t controlsParentBaseCount = 3;
 constexpr size_t controlsPowerMinCount = 2;
 constexpr size_t controlsPowerMaxCount = 3;
+// Kobo exposes the remaining front-control preferences, but not the two X4
+// hardware-button remapping wizards: its permanent navigation controls are
+// touch regions rather than remappable physical keys.
+#ifdef KOBO_LINUX
+constexpr size_t controlsFrontButtonCount = 4;
+#else
 constexpr size_t controlsFrontButtonCount = 6;
+#endif
 constexpr size_t controlsSideButtonCount = 3;
 
 uint8_t enumDisplayIndexForRawValue(const SettingInfo& setting, uint8_t rawValue) {
@@ -394,7 +412,19 @@ void SettingsActivity::openEnumOptionPicker(const SettingInfo& setting) {
     const bool quickResumeTimeoutChanged = selectedSetting.valuePtr == &CrossPointSettings::quickResumeSleepScreen;
     syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
     SETTINGS.saveToFile();
-    rebuildSettingsLists();
+#ifdef KOBO_LINUX
+    if (selectedSetting.valuePtr == &CrossPointSettings::koboUiScalePercent) {
+      applyKoboUiFontScale(renderer);
+      UITheme::getInstance().reload();
+    }
+    if (selectedSetting.valuePtr == &CrossPointSettings::koboWebTransferEnabled) {
+      crossink::kobo::reconcileWebTransfer();
+    }
+#endif
+    {
+      RenderLock lock(*this);
+      rebuildSettingsLists();
+    }
     requestUpdate();
   });
   requestUpdate();
@@ -543,6 +573,27 @@ void SettingsActivity::onExit() {
 void SettingsActivity::loop() {
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  int directSetting = 0;
+  int ignoredCurrent = 0;
+  if (mappedInput.consumeNavigationTouchTarget(directSetting, ignoredCurrent) && directSetting >= 0 &&
+      directSetting < settingsCount) {
+    selectedSettingIndex = directSetting + 1;
+    toggleCurrentSetting();
+    requestUpdate();
+    return;
+  }
+  MappedInputManager::TouchTarget touchTarget;
+  if (mappedInput.consumeTouchTarget(touchTarget) &&
+      touchTarget.kind == static_cast<unsigned char>(TouchUiRegistry::TargetKind::Tab) && touchTarget.primary >= 0 &&
+      touchTarget.primary < categoryCount) {
+    enterCategory(touchTarget.primary);
+    selectedSettingIndex = 0;
+    requestUpdate();
+    return;
+  }
+#endif
+
   bool hasChangedCategory = false;
 
   // Handle actions with early return
@@ -662,6 +713,7 @@ void SettingsActivity::toggleCurrentSetting() {
     startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, &sdFontSystem.registry()),
                            [this](const ActivityResult&) {
                              SETTINGS.saveToFile();
+                             RenderLock lock(*this);
                              rebuildSettingsLists();
                            });
     return;
@@ -689,6 +741,7 @@ void SettingsActivity::toggleCurrentSetting() {
       startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, &sdFontSystem.registry()),
                              [this](const ActivityResult&) {
                                SETTINGS.saveToFile();
+                               RenderLock lock(*this);
                                rebuildSettingsLists();
                              });
       return;
@@ -727,6 +780,9 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::Network:
         startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false), resultHandler);
         break;
+      case SettingAction::DeviceInfo:
+        startActivityForResult(std::make_unique<DeviceInfoActivity>(renderer, mappedInput), resultHandler);
+        break;
       case SettingAction::BackupStats:
         startActivityForResult(std::make_unique<BackupStatsActivity>(renderer, mappedInput), resultHandler);
         break;
@@ -744,16 +800,19 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::ClearCache:
         startActivityForResult(std::make_unique<ClearCacheActivity>(renderer, mappedInput), resultHandler);
         break;
+#ifndef KOBO_LINUX
       case SettingAction::CheckForUpdates:
         startActivityForResult(std::make_unique<OtaUpdateActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::SdFirmwareUpdate:
         startActivityForResult(std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInput), resultHandler);
         break;
+#endif
       case SettingAction::DownloadFonts:
         startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput),
                                [this](const ActivityResult&) {
                                  SETTINGS.saveToFile();
+                                 RenderLock lock(*this);
                                  rebuildSettingsLists();
                                });
         break;

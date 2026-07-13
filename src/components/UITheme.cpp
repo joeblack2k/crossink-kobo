@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
 #include <memory>
 
 #include "MappedInputManager.h"
@@ -34,6 +35,69 @@ std::string addBmpSuffix(const std::string& path, const char* suffix) {
   suffixedPath.insert(extPos, suffix);
   return suffixedPath;
 }
+
+#ifdef KOBO_LINUX
+int scaleUiMetric(const int value, const int percent) { return std::max(1, value * percent / 100); }
+
+ThemeMetrics scaledKoboMetrics(ThemeMetrics metrics, const int percent) {
+  // Scale physical touch-UI geometry, but not reader layout, percentages or
+  // counts. The persistent two-button Kobo frame is fixed at 96 px.
+  metrics.batteryWidth = scaleUiMetric(metrics.batteryWidth, percent);
+  metrics.batteryHeight = scaleUiMetric(metrics.batteryHeight, percent);
+  metrics.topPadding = scaleUiMetric(metrics.topPadding, percent);
+  metrics.batteryBarHeight = scaleUiMetric(metrics.batteryBarHeight, percent);
+  metrics.headerHeight = scaleUiMetric(metrics.headerHeight, percent);
+  metrics.verticalSpacing = scaleUiMetric(metrics.verticalSpacing, percent);
+  metrics.previewPadding = scaleUiMetric(metrics.previewPadding, percent);
+  metrics.contentSidePadding = scaleUiMetric(metrics.contentSidePadding, percent);
+  metrics.listRowHeight = scaleUiMetric(metrics.listRowHeight, percent);
+  metrics.listWithSubtitleRowHeight = scaleUiMetric(metrics.listWithSubtitleRowHeight, percent);
+  metrics.menuRowHeight = scaleUiMetric(metrics.menuRowHeight, percent);
+  metrics.menuSpacing = scaleUiMetric(metrics.menuSpacing, percent);
+  metrics.tabSpacing = scaleUiMetric(metrics.tabSpacing, percent);
+  metrics.tabBarHeight = scaleUiMetric(metrics.tabBarHeight, percent);
+  metrics.scrollBarWidth = scaleUiMetric(metrics.scrollBarWidth, percent);
+  metrics.scrollBarRightOffset = scaleUiMetric(metrics.scrollBarRightOffset, percent);
+  metrics.homeTopPadding = scaleUiMetric(metrics.homeTopPadding, percent);
+  metrics.homeCoverHeight = scaleUiMetric(metrics.homeCoverHeight, percent);
+  metrics.homeCoverTileHeight = scaleUiMetric(metrics.homeCoverTileHeight, percent);
+  metrics.homeMenuTopOffset = scaleUiMetric(metrics.homeMenuTopOffset, percent);
+  metrics.buttonHintsHeight = std::max(96, metrics.buttonHintsHeight);
+  metrics.sideButtonHintsWidth = scaleUiMetric(metrics.sideButtonHintsWidth, percent);
+  metrics.progressBarHeight = scaleUiMetric(metrics.progressBarHeight, percent);
+  metrics.progressBarMarginTop = scaleUiMetric(metrics.progressBarMarginTop, percent);
+  metrics.statusBarHorizontalMargin = scaleUiMetric(metrics.statusBarHorizontalMargin, percent);
+  metrics.statusBarVerticalMargin = scaleUiMetric(metrics.statusBarVerticalMargin, percent);
+  metrics.keyboardKeyWidth = scaleUiMetric(metrics.keyboardKeyWidth, percent);
+  metrics.keyboardKeyHeight = scaleUiMetric(metrics.keyboardKeyHeight, percent);
+  metrics.keyboardKeySpacing = scaleUiMetric(metrics.keyboardKeySpacing, percent);
+  metrics.keyboardBottomKeyHeight = scaleUiMetric(metrics.keyboardBottomKeyHeight, percent);
+  metrics.keyboardBottomKeySpacing = scaleUiMetric(metrics.keyboardBottomKeySpacing, percent);
+  metrics.keyboardVerticalOffset = metrics.keyboardVerticalOffset * percent / 100;
+  metrics.keyboardKeyCornerRadius = scaleUiMetric(metrics.keyboardKeyCornerRadius, percent);
+  metrics.keyboardSecondaryLabelRightPadding = scaleUiMetric(metrics.keyboardSecondaryLabelRightPadding, percent);
+  metrics.keyboardSecondaryLabelTopPadding = scaleUiMetric(metrics.keyboardSecondaryLabelTopPadding, percent);
+  metrics.keyboardMinArrowHeadSize = scaleUiMetric(metrics.keyboardMinArrowHeadSize, percent);
+  metrics.popupMarginX = scaleUiMetric(metrics.popupMarginX, percent);
+  metrics.popupMarginY = scaleUiMetric(metrics.popupMarginY, percent);
+  metrics.popupFrameThickness = scaleUiMetric(metrics.popupFrameThickness, percent);
+  metrics.popupCornerRadius = scaleUiMetric(metrics.popupCornerRadius, percent);
+  metrics.popupTextBaselineOffsetY = metrics.popupTextBaselineOffsetY * percent / 100;
+  metrics.popupProgressBarHeight = scaleUiMetric(metrics.popupProgressBarHeight, percent);
+  metrics.optionPopupItemSpacing = scaleUiMetric(metrics.optionPopupItemSpacing, percent);
+  metrics.optionPopupInnerPadding = scaleUiMetric(metrics.optionPopupInnerPadding, percent);
+  metrics.optionPopupSelectionHPadding = scaleUiMetric(metrics.optionPopupSelectionHPadding, percent);
+  metrics.optionPopupSelectionVPadding = scaleUiMetric(metrics.optionPopupSelectionVPadding, percent);
+  metrics.optionPopupTitleGap = scaleUiMetric(metrics.optionPopupTitleGap, percent);
+  metrics.optionPopupSelectionRadius = scaleUiMetric(metrics.optionPopupSelectionRadius, percent);
+  metrics.optionPopupDialogSideMargin = scaleUiMetric(metrics.optionPopupDialogSideMargin, percent);
+  metrics.textFieldHorizontalPadding = scaleUiMetric(metrics.textFieldHorizontalPadding, percent);
+  metrics.textFieldNormalThickness = scaleUiMetric(metrics.textFieldNormalThickness, percent);
+  metrics.textFieldCursorThickness = scaleUiMetric(metrics.textFieldCursorThickness, percent);
+  metrics.textFieldLineEndOffset = metrics.textFieldLineEndOffset * percent / 100;
+  return metrics;
+}
+#endif
 }  // namespace
 
 UITheme UITheme::instance;
@@ -91,6 +155,14 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       currentMetrics = &BaseMetrics::values;
       break;
   }
+#ifdef KOBO_LINUX
+  const int requestedScale = SETTINGS.koboUiScalePercent;
+  const int validScale = requestedScale == 100 || requestedScale == 150 || requestedScale == 200 || requestedScale == 250
+                             ? requestedScale
+                             : 200;
+  scaledMetrics = scaledKoboMetrics(*currentMetrics, validScale);
+  currentMetrics = &scaledMetrics;
+#endif
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,

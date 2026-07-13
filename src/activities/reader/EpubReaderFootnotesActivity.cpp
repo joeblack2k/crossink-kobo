@@ -6,8 +6,14 @@
 #include <algorithm>
 
 #include "MappedInputManager.h"
+#include "components/DirectListTouch.h"
+#include "components/TouchUiRegistry.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+namespace {
+constexpr int kKoboTouchFrameHeight = 96;
+}
 
 void EpubReaderFootnotesActivity::onEnter() {
   Activity::onEnter();
@@ -18,6 +24,11 @@ void EpubReaderFootnotesActivity::onEnter() {
 void EpubReaderFootnotesActivity::onExit() { Activity::onExit(); }
 
 void EpubReaderFootnotesActivity::loop() {
+  // Footnotes are a reader child activity, so they must be activated by the
+  // same one-tap list bridge as chapter selection.  Otherwise a Kobo touch
+  // merely moved the legacy X4 focus and the user needed a second Select.
+  consumeDirectListSelection(mappedInput, static_cast<int>(footnotes.size()), selectedIndex);
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     ActivityResult result;
     result.isCancelled = true;
@@ -84,7 +95,10 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
   const int screenWidth = renderer.getScreenWidth();
   const int marginLeft = contentX + 20;
 
-  const int visibleCount = std::max(1, (renderer.getScreenHeight() - contentY) / lineHeight);
+  // Keep every published row out of the permanent Kobo Back/Select frame.
+  // The gesture layer owns that frame before it resolves UI hit targets.
+  const int contentBottom = renderer.getScreenHeight() - kKoboTouchFrameHeight;
+  const int visibleCount = std::max(1, (contentBottom - (60 + contentY)) / lineHeight);
   if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
   if (selectedIndex >= scrollOffset + visibleCount) scrollOffset = selectedIndex - visibleCount + 1;
 
@@ -95,6 +109,11 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
     if (isSelected) {
       renderer.fillRect(0, y, screenWidth, lineHeight, true);
     }
+
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerItem(contentX, y, contentWidth, lineHeight, selectedIndex, i,
+                          static_cast<int>(footnotes.size()));
+#endif
 
     // Show footnote number and abbreviated href
     std::string label = footnotes[i].number;

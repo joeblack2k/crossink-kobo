@@ -26,6 +26,7 @@ PAGES = {
     "files":    ("/files",    "Files - CrossInk",           "files",    '  <script src="/js/jszip.min.js"></script>'),
     "settings": ("/settings", "Settings - CrossInk Reader", "settings", ""),
     "fonts":    ("/fonts",    "Fonts - CrossInk",           "fonts",    ""),
+    "portal":   ("/portal",   "CrossInk for Kobo",          "",         ""),
 }
 ROUTE_TO_SLUG = {route: slug for slug, (route, *_rest) in PAGES.items()}
 
@@ -50,6 +51,11 @@ def render_page(slug):
 # Representative mock data so the pages render populated.
 MOCK_API = {
     "/api/status": {"version": "dev-preview", "ip": "192.168.4.1", "freeHeap": 142000},
+    "/api/network/services": {
+        "webTransferEnabled": True, "webUrl": "http://192.168.2.217",
+        "webdavUrl": "http://192.168.2.217/", "calibre": "Available on this Wi-Fi network",
+        "koreader": {"configured": True, "serverUrl": "http://sync.local", "username": "reader", "hasPassword": True, "matchMethod": 0},
+    },
     "/api/files": [
         {"name": "Books", "isDirectory": True, "isEpub": False, "size": 0},
         {"name": "Read", "isDirectory": True, "isEpub": False, "size": 0},

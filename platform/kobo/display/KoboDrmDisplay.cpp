@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "KoboDrmDisplay.h"
 
-#include <cerrno>
-#include <cstring>
-
+#include <drm.h>
+#include <drm_mode.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
-
-#include <drm.h>
-#include <drm_mode.h>
 #include <xf86drm.h>
+
+#include <array>
+#include <cerrno>
+#include <cstring>
 
 namespace crossink::kobo {
 namespace {
@@ -28,10 +28,21 @@ struct MxcEpdcRefresh {
   std::uint32_t updateMode;
 };
 
-bool packedPixelIsWhite(const std::uint8_t* packed, const std::uint16_t x, const std::uint16_t y) {
-  const std::size_t offset = static_cast<std::size_t>(y) * (KoboFbInkDisplay::kPanelWidth / 8U) + x / 8U;
-  return (packed[offset] & static_cast<std::uint8_t>(0x80U >> (x % 8U))) != 0;
+constexpr auto makeMonoExpansionTable() {
+  std::array<std::array<std::uint32_t, 8>, 256> table{};
+  for (std::size_t value = 0; value < table.size(); ++value) {
+    for (std::size_t bit = 0; bit < table[value].size(); ++bit) {
+      // CrossInk's 1-bit buffer follows the conventional ink convention:
+      // a set bit is paper/white and a clear bit is ink/black.  The DRM
+      // mxc-epdc path consumes XRGB8888 luminance (white = 0x00ffffff),
+      // so expand the packed value without changing its polarity.
+      table[value][bit] = (value & (0x80U >> bit)) != 0 ? 0x00FFFFFFU : 0x00000000U;
+    }
+  }
+  return table;
 }
+
+constexpr auto kMonoExpansion = makeMonoExpansionTable();
 
 int koboDrmIoctl(const int fd, const unsigned long request, void* argument) {
   return ::ioctl(fd, static_cast<int>(request), argument);
@@ -148,7 +159,7 @@ bool KoboDrmDisplay::createBuffer() {
   return true;
 }
 
-bool KoboDrmDisplay::requestRefresh(const RefreshKind kind) {
+bool KoboDrmDisplay::requestRefresh(const RefreshKind kind, const RefreshRegion& region) {
   MxcEpdcRefresh refresh{};
   switch (kind) {
     case RefreshKind::Fast:
@@ -166,10 +177,10 @@ bool KoboDrmDisplay::requestRefresh(const RefreshKind kind) {
     return false;
   }
   drmModeClip clip{};
-  clip.x1 = 0;
-  clip.y1 = 0;
-  clip.x2 = mode_.hdisplay;
-  clip.y2 = mode_.vdisplay;
+  clip.x1 = region.x;
+  clip.y1 = region.y;
+  clip.x2 = static_cast<std::uint16_t>(region.x + region.width);
+  clip.y2 = static_cast<std::uint16_t>(region.y + region.height);
   if (drmModeDirtyFB(fd_, framebufferId_, &clip, 1) != 0) {
     lastError_ = errno;
     return false;
@@ -177,21 +188,41 @@ bool KoboDrmDisplay::requestRefresh(const RefreshKind kind) {
   return true;
 }
 
-bool KoboDrmDisplay::presentPackedMono(const std::uint8_t* packed, const std::size_t packedSize,
-                                       const RefreshKind kind) {
-  if (!isOpen() || packed == nullptr || packedSize != KoboFbInkDisplay::kPackedFrameBytes || map_ == nullptr) {
+void KoboDrmDisplay::copyRegion(const std::uint8_t* const packed, const RefreshRegion& region) {
+  constexpr std::size_t packedRowBytes = KoboFbInkDisplay::kPanelWidth / 8U;
+  const std::size_t startByte = region.x / 8U;
+  const std::size_t endByte = (static_cast<std::size_t>(region.x) + region.width + 7U) / 8U;
+  for (std::uint16_t y = region.y; y < static_cast<std::uint16_t>(region.y + region.height); ++y) {
+    auto* destination = reinterpret_cast<std::uint32_t*>(map_ + static_cast<std::size_t>(y) * pitch_);
+    const auto* source = packed + static_cast<std::size_t>(y) * packedRowBytes;
+    for (std::size_t byte = startByte; byte < endByte; ++byte) {
+      const auto& expanded = kMonoExpansion[source[byte]];
+      std::memcpy(destination + byte * expanded.size(), expanded.data(), sizeof(expanded));
+    }
+  }
+}
+
+bool KoboDrmDisplay::presentPackedMono(const std::uint8_t* const packed, const std::size_t packedSize,
+                                       const RefreshKind kind, const RefreshRegion& region) {
+  const bool regionValid = !region.empty() && region.x < KoboFbInkDisplay::kPanelWidth &&
+                           region.y < KoboFbInkDisplay::kPanelHeight &&
+                           static_cast<std::uint32_t>(region.x) + region.width <= KoboFbInkDisplay::kPanelWidth &&
+                           static_cast<std::uint32_t>(region.y) + region.height <= KoboFbInkDisplay::kPanelHeight;
+  if (!isOpen() || packed == nullptr || packedSize != KoboFbInkDisplay::kPackedFrameBytes || map_ == nullptr ||
+      !regionValid) {
     lastError_ = EINVAL;
     return false;
   }
-  for (std::uint16_t y = 0; y < KoboFbInkDisplay::kPanelHeight; ++y) {
-    auto* row = reinterpret_cast<std::uint32_t*>(map_ + static_cast<std::size_t>(y) * pitch_);
-    for (std::uint16_t x = 0; x < KoboFbInkDisplay::kPanelWidth; ++x) {
-      row[x] = packedPixelIsWhite(packed, x, y) ? 0x00FFFFFFU : 0x00000000U;
-    }
-  }
-  if (!requestRefresh(kind)) return false;
+  copyRegion(packed, region);
+  if (!requestRefresh(kind, region)) return false;
   lastError_ = 0;
   return true;
+}
+
+bool KoboDrmDisplay::presentPackedMono(const std::uint8_t* const packed, const std::size_t packedSize,
+                                       const RefreshKind kind) {
+  return presentPackedMono(packed, packedSize, kind,
+                           KoboDirtyRegion::full(KoboFbInkDisplay::kPanelWidth, KoboFbInkDisplay::kPanelHeight));
 }
 
 void KoboDrmDisplay::destroyBuffer() {

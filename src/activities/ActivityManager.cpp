@@ -1,11 +1,17 @@
 #include "ActivityManager.h"
 
 #include <FontCacheManager.h>
+#include <HalDisplay.h>
 #include <HalPowerManager.h>
 
 #include <algorithm>
+#include <optional>
 
 #include "CrossPointState.h"
+#ifdef KOBO_LINUX
+#include "components/TouchUiRegistry.h"
+#endif
+#include "OpdsCatalogStore.h"
 #include "OpdsServerStore.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
@@ -23,7 +29,21 @@
 #include "settings/SettingsActivity.h"
 #include "util/FullScreenMessageActivity.h"
 
+namespace {
+void requestCleanRefreshForEntry(const Activity* const activity) {
+#ifdef KOBO_LINUX
+  if (activity != nullptr && activity->requiresCleanRefreshOnEntry()) display.requestCleanRefresh();
+#else
+  (void)activity;
+#endif
+}
+}  // namespace
+
 void ActivityManager::begin() {
+#if defined(KOBO_LINUX)
+  const bool started = renderScheduler.start(&renderTaskTrampoline, this);
+  assert(started && "Failed to create Kobo render worker");
+#else
   xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
                           16384,  // Stack size - createSectionFile() puts ChapterHtmlSlimParser on stack during
                                   // silentIndexNextChapterIfNeeded
@@ -33,6 +53,7 @@ void ActivityManager::begin() {
                           0                   // Pin to core 0 (PRO_CPU)
   );
   assert(renderTaskHandle != nullptr && "Failed to create render task");
+#endif
 }
 
 void ActivityManager::renderTaskTrampoline(void* param) {
@@ -42,15 +63,25 @@ void ActivityManager::renderTaskTrampoline(void* param) {
 
 void ActivityManager::renderTaskLoop() {
   while (true) {
+#if defined(KOBO_LINUX)
+    if (!renderScheduler.waitForRenderRequest()) return;
+#else
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+#endif
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
     // where the main task deletes the activity between the null-check and render().
     RenderLock lock;
     if (currentActivity) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
+#ifdef KOBO_LINUX
+      TOUCH_UI.clear();
+#endif
       currentActivity->render(std::move(lock));
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
+#if defined(KOBO_LINUX)
+    renderScheduler.finishRender();
+#else
     TaskHandle_t waiter = nullptr;
     taskENTER_CRITICAL(&renderStateMux);
     waiter = waitingTaskHandle;
@@ -59,6 +90,7 @@ void ActivityManager::renderTaskLoop() {
     if (waiter) {
       xTaskNotify(waiter, 1, eIncrement);
     }
+#endif
   }
 }
 
@@ -115,6 +147,7 @@ void ActivityManager::loop() {
         // deadlock guard even though the queued repaint is sufficient.
         if (pendingAction == PendingAction::None) {
           lock.unlock();
+          requestCleanRefreshForEntry(currentActivity.get());
           requestUpdate();
         }
 
@@ -143,6 +176,7 @@ void ActivityManager::loop() {
       currentActivity = std::move(pendingActivity);
 
       lock.unlock();  // onEnter may acquire its own lock
+      requestCleanRefreshForEntry(currentActivity.get());
       currentActivity->onEnter();
 
       // onEnter may request another pending action, we will handle it in the next loop iteration
@@ -158,9 +192,13 @@ void ActivityManager::loop() {
   if (requestedUpdate.exchange(false)) {
     // Using direct notification to signal the render task to update
     // Increment counter so multiple rapid calls won't be lost
+#if defined(KOBO_LINUX)
+    renderScheduler.requestRender();
+#else
     if (renderTaskHandle) {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
     }
+#endif
   }
 }
 
@@ -182,6 +220,7 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
   } else {
     // No current activity, safe to launch immediately
     currentActivity = std::move(newActivity);
+    requestCleanRefreshForEntry(currentActivity.get());
     currentActivity->onEnter();
   }
 }
@@ -221,6 +260,33 @@ void ActivityManager::goToRecentBooks() {
   } else {
     replaceActivity(std::make_unique<RecentBooksActivity>(renderer, mappedInput));
   }
+}
+
+void ActivityManager::goToLibrarySeries() {
+  replaceActivity(
+      std::make_unique<RecentBooksGridActivity>(renderer, mappedInput, RecentBooksGridActivity::LibraryView::Series));
+}
+
+void ActivityManager::goToLibraryCollections() {
+  replaceActivity(std::make_unique<RecentBooksGridActivity>(renderer, mappedInput,
+                                                            RecentBooksGridActivity::LibraryView::Collections));
+}
+
+void ActivityManager::goToLibrary(const bool forceRefresh) {
+  const auto& servers = OPDS_STORE.getServers();
+  if (servers.empty()) {
+    goToBrowser();
+    return;
+  }
+  // The grid is driven by persistent catalog metadata. On a brand-new device
+  // it has no cache yet, so bootstrap the configured server once first.
+  if (forceRefresh || OPDS_CATALOG.getBooksForServer(servers.front().id).empty()) {
+    replaceActivity(
+        std::make_unique<OpdsBookBrowserActivity>(renderer, mappedInput, servers.front(), std::nullopt, true));
+    return;
+  }
+  replaceActivity(
+      std::make_unique<RecentBooksGridActivity>(renderer, mappedInput, RecentBooksGridActivity::LibraryView::Catalog));
 }
 
 void ActivityManager::goToBrowser() {
@@ -338,9 +404,13 @@ ScreenshotInfo ActivityManager::getScreenshotInfo() const {
 
 void ActivityManager::requestUpdate(bool immediate) {
   if (immediate) {
+#if defined(KOBO_LINUX)
+    renderScheduler.requestRender();
+#else
     if (renderTaskHandle) {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
     }
+#endif
   } else {
     // Deferring the update until current loop is finished
     // This is to avoid multiple updates being requested in the same loop
@@ -348,6 +418,13 @@ void ActivityManager::requestUpdate(bool immediate) {
   }
 }
 RequestUpdateResult ActivityManager::requestUpdateAndWait() {
+#if defined(KOBO_LINUX)
+  if (!renderScheduler.requestRenderAndWait()) {
+    LOG_ERR("ACT", "requestUpdateAndWait() rejected by Kobo render scheduler");
+    return RequestUpdateResult::Rejected;
+  }
+  return RequestUpdateResult::Rendered;
+#else
   if (!renderTaskHandle) {
     return RequestUpdateResult::Rejected;
   }
@@ -383,30 +460,47 @@ RequestUpdateResult ActivityManager::requestUpdateAndWait() {
   xTaskNotify(renderTaskHandle, 1, eIncrement);
   ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
   return RequestUpdateResult::Rendered;
+#endif
 }
 
 // RenderLock
 
 RenderLock::RenderLock() {
+#if defined(KOBO_LINUX)
+  activityManager.renderScheduler.lockRender();
+#else
   xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+#endif
   isLocked = true;
 }
 
 RenderLock::RenderLock([[maybe_unused]] Activity&) {
+#if defined(KOBO_LINUX)
+  activityManager.renderScheduler.lockRender();
+#else
   xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+#endif
   isLocked = true;
 }
 
 RenderLock::~RenderLock() {
   if (isLocked) {
+#if defined(KOBO_LINUX)
+    activityManager.renderScheduler.unlockRender();
+#else
     xSemaphoreGive(activityManager.renderingMutex);
+#endif
     isLocked = false;
   }
 }
 
 void RenderLock::unlock() {
   if (isLocked) {
+#if defined(KOBO_LINUX)
+    activityManager.renderScheduler.unlockRender();
+#else
     xSemaphoreGive(activityManager.renderingMutex);
+#endif
     isLocked = false;
   }
 }
@@ -418,4 +512,10 @@ void RenderLock::unlock() {
  *
  * @note Must not be called from ISR context — xSemaphoreGetMutexHolder is not ISR-safe.
  */
-bool RenderLock::peek() { return xSemaphoreGetMutexHolder(activityManager.renderingMutex) != nullptr; }
+bool RenderLock::peek() {
+#if defined(KOBO_LINUX)
+  return activityManager.renderScheduler.isRenderLockHeld();
+#else
+  return xSemaphoreGetMutexHolder(activityManager.renderingMutex) != nullptr;
+#endif
+}

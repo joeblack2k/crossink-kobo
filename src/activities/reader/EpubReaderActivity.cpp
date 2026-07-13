@@ -81,6 +81,9 @@ constexpr uint8_t BOOK_PROGRESS_ESTIMATE_FLOOR_PERCENT = 90;
 constexpr uint16_t FOOTNOTE_PREVIEW_MAX_PAGES = 3;
 constexpr uint8_t PUBLISHER_PAGE_NUMBER_LEFT_MARGIN_MIN = 15;
 constexpr int PUBLISHER_PAGE_NUMBER_X = 5;
+// Building a large next chapter may take several seconds on the N437.  Wait
+// for an actual reading pause rather than competing with ordinary page turns.
+constexpr unsigned long NEXT_SPINE_PRELOAD_IDLE_MS = 15000UL;
 
 uint32_t pagesCentipages(const float pages) {
   if (pages <= 0.0f) {
@@ -1724,6 +1727,8 @@ void EpubReaderActivity::onEnter() {
   captureGlobalReaderSettings();
   epub->setupCacheDir();
   loadBookReaderSettings();
+  LOG_INF("ERS", "Reader preferences: dark=%u orientation=%u font=%u size=%u", SETTINGS.readerDarkMode,
+          SETTINGS.orientation, SETTINGS.fontFamily, SETTINGS.fontSize);
   sdFontSystem.ensureLoaded(renderer);
 
   // Configure screen orientation based on settings
@@ -1796,9 +1801,11 @@ void EpubReaderActivity::onEnter() {
   // Save current epub as last opened epub and add to recent books
   APP_STATE.openEpubPath = epub->getPath();
   APP_STATE.saveToFile();
-  RECENT_BOOKS.addOrUpdateBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+  RECENT_BOOKS.addOrUpdateBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath(),
+                               epub->getSeries(), epub->getSeriesIndex(), epub->getCollection());
 
   // Trigger first update
+  lastPageTurnTime = millis();
   requestUpdate();
 }
 
@@ -2034,7 +2041,8 @@ void EpubReaderActivity::loop() {
     if (atEndOfBook && !recentsEntryRemoved) {
       recentsEntryRemoved = RECENT_BOOKS.removeByPath(epub->getPath());
     } else if (!atEndOfBook && recentsEntryRemoved) {
-      RECENT_BOOKS.addOrUpdateBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+      RECENT_BOOKS.addOrUpdateBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath(),
+                                   epub->getSeries(), epub->getSeriesIndex(), epub->getCollection());
       recentsEntryRemoved = false;
     }
   }
@@ -2286,6 +2294,7 @@ void EpubReaderActivity::loop() {
     heldLongPowerTurn = true;
   }
   if (!prevTriggered && !nextTriggered) {
+    maybePreindexNextSpine();
     return;
   }
 
@@ -2918,6 +2927,7 @@ void EpubReaderActivity::reindexCurrentSection() {
     restoreSavedPosition();
     return;
   }
+  nextSpinePreloadAttempted = -1;
   {
     RenderLock lock(*this);
     GUI.drawPopup(renderer, tr(STR_INDEXING));
@@ -2927,6 +2937,57 @@ void EpubReaderActivity::reindexCurrentSection() {
     section.reset();
   }
   requestUpdate();
+}
+
+void EpubReaderActivity::maybePreindexNextSpine() {
+#ifndef KOBO_LINUX
+  return;
+#else
+  // Preloading is opportunistic: never show UI, never change the active
+  // section, never run during automatic paging/footnote preview, and do not
+  // retry continuously after an unsupported chapter.  The actual pages remain
+  // SD-backed Section caches, so this does not turn a whole book into RAM use.
+  if (!epub || !section || activeFootnotePreview || automaticPageTurnActive || RenderLock::peek()) return;
+  const int targetSpine = currentSpineIndex + 1;
+  if (targetSpine < 0 || targetSpine >= epub->getSpineItemsCount() || targetSpine == nextSpinePreloadAttempted) return;
+  if (millis() - lastPageTurnTime < NEXT_SPINE_PRELOAD_IDLE_MS) return;
+  if (!MemoryBudget::hasHeapForOptionalEpubRebuild("PRE", "idle next-chapter pre-index", targetSpine)) {
+    nextSpinePreloadAttempted = targetSpine;
+    return;
+  }
+
+  // Mark first: a malformed chapter must not monopolise every idle loop.
+  nextSpinePreloadAttempted = targetSpine;
+  const ReaderViewportLayout layout = computeReaderViewportLayout(renderer, automaticPageTurnActive);
+  const int fontId = SETTINGS.getReaderFontId();
+  const EpubRenderMode renderMode = normalizeRenderMode(SETTINGS.epubRenderMode);
+  const SectionBuildProfile profile = buildProfileForRenderMode(renderMode);
+  auto preload = makeUniqueNoThrow<Section>(epub, targetSpine, renderer, sectionCacheSuffixForRenderMode(profile.renderMode));
+  if (!preload) {
+    LOG_DBG("PRE", "Skipping next-chapter pre-index: allocation failed for spine %d", targetSpine);
+    return;
+  }
+  if (preload->loadSectionFile(fontId, SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+                               SETTINGS.forceParagraphIndents, SETTINGS.paragraphAlignment, layout.viewportWidth,
+                               layout.viewportHeight, SETTINGS.hyphenationEnabled, profile.embeddedStyle,
+                               SETTINGS.imageRendering, profile.bionicReadingEnabled, profile.guideReadingEnabled,
+                               profile.renderMode)) {
+    LOG_DBG("PRE", "Next chapter cache already warm: spine=%d pages=%u", targetSpine, preload->pageCount);
+    return;
+  }
+
+  bool lowMemoryAbort = false;
+  const bool built = preload->createSectionFile(
+      fontId, SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing, SETTINGS.forceParagraphIndents,
+      SETTINGS.paragraphAlignment, layout.viewportWidth, layout.viewportHeight, SETTINGS.hyphenationEnabled,
+      profile.embeddedStyle, SETTINGS.imageRendering, profile.bionicReadingEnabled, profile.guideReadingEnabled,
+      []() {}, nullptr, &lowMemoryAbort, profile.renderMode);
+  if (built) {
+    LOG_INF("PRE", "Idle pre-index complete: spine=%d pages=%u", targetSpine, preload->pageCount);
+  } else {
+    LOG_DBG("PRE", "Idle pre-index skipped/failed: spine=%d low_memory=%d", targetSpine, lowMemoryAbort ? 1 : 0);
+  }
+#endif
 }
 
 void EpubReaderActivity::openFileTransfer() {
@@ -3496,7 +3557,8 @@ void EpubReaderActivity::setBookCompleted(bool isCompleted) {
     }
   } else {
     if (SETTINGS.removeReadBooksFromRecents) {
-      RECENT_BOOKS.addOrUpdateBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+      RECENT_BOOKS.addOrUpdateBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath(),
+                                   epub->getSeries(), epub->getSeriesIndex(), epub->getCollection());
     }
     recentsEntryRemoved = false;
     pendingReadFolderMove = false;
@@ -4047,6 +4109,25 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   renderer.clearScreen(ReaderUtils::readerBackgroundColor());
 
   if (section->pageCount == 0) {
+    // EPUBs commonly put an SVG cover, an empty divider, or a navigation
+    // document in the spine.  CrossInk does not lay those constructs out as
+    // reader pages.  Leaving an empty Section active used to strand the
+    // reader here: forward input only pre-indexed the next spine and the
+    // previous framebuffer could remain visible.  Advance one spine at a
+    // time so the normal render path reaches the first readable chapter, and
+    // still falls through to the ordinary end-of-book screen when every
+    // remaining spine is non-renderable.
+    if (!activeFootnotePreview && currentSpineIndex < epub->getSpineItemsCount()) {
+      LOG_DBG("ERS", "Skipping non-renderable spine: index=%d href=%s", currentSpineIndex,
+              epub->getSpineItem(currentSpineIndex).href.c_str());
+      section.reset();
+      ++currentSpineIndex;
+      nextPageNumber = 0;
+      pendingPageJump.reset();
+      requestUpdate();
+      return;
+    }
+
     LOG_DBG("ERS", "No pages to render");
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), ReaderUtils::readerForegroundBlack(),
                               EpdFontFamily::BOLD);
@@ -4264,8 +4345,15 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
 
   const bool pageHasImages = page->hasImages();
   const bool foregroundBlack = ReaderUtils::readerForegroundBlack();
-  const bool needsImageGrayscale = pageHasImages;
-  const bool needsTextGrayscale = SETTINGS.textAntiAliasing && foregroundBlack;
+  // The Kobo DRM backend is intentionally 1-bit until it owns real EPDC
+  // grayscale planes.  Its compatibility stubs accept the ESP/X3 grayscale
+  // sequence but cannot retain its LSB/MSB planes; running that sequence
+  // clears the physical page to black after a perfectly valid BW render.
+  // Gate every optional grayscale pass on actual platform support instead of
+  // merely on the reader preference or image content.
+  const bool supportsGrayscalePlanes = renderer.supportsStripGrayscale();
+  const bool needsImageGrayscale = pageHasImages && supportsGrayscalePlanes;
+  const bool needsTextGrayscale = SETTINGS.textAntiAliasing && foregroundBlack && supportsGrayscalePlanes;
   const bool needsAnyGrayscale = needsTextGrayscale || needsImageGrayscale;
   const int contentBottom = renderer.getScreenHeight() - orientedMarginBottom;
 
@@ -4323,44 +4411,21 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
   }
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
-  const auto logImagePageProfile = [](const uint32_t imageBlankDisplayMs, const uint32_t imageRestoreRenderMs,
-                                      const uint32_t imageFinalDisplayMs) {
-    LOG_DBG("ERS", "Image page profile: blank_display=%lums restore_render=%lums final_display=%lums",
-            imageBlankDisplayMs, imageRestoreRenderMs, imageFinalDisplayMs);
-  };
-
   if (pageHasImages) {
-    // Double FAST_REFRESH with selective image blanking (pablohc's technique):
-    // HALF_REFRESH sets particles too firmly for the grayscale LUT to adjust.
-    // Instead, blank only the image area and do two fast refreshes.
-    // Step 1: Display page with image area blanked (text appears, image area white)
-    // Step 2: Re-render with images and display again (images appear clean)
-    int16_t imgX, imgY, imgW, imgH;
-    if (page->getImageBoundingBox(imgX, imgY, imgW, imgH)) {
-      renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
-      const auto tImageBlankDisplay = millis();
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-      const uint32_t imageBlankDisplayMs = millis() - tImageBlankDisplay;
-
-      // Re-render page content to restore images into the blanked area
-      // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      const auto tImageRestoreRender = millis();
-      composePageBuffer();
-      const uint32_t imageRestoreRenderMs = millis() - tImageRestoreRender;
-      const auto tImageFinalDisplay = millis();
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-      const uint32_t imageFinalDisplayMs = millis() - tImageFinalDisplay;
-      logImagePageProfile(imageBlankDisplayMs, imageRestoreRenderMs, imageFinalDisplayMs);
-    } else {
-      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-    }
-    // The image's own page is handled above and doesn't count toward the full
-    // refresh cadence. But the grayscale pass below leaves gray charge in the
-    // image region that a plain fast diff on the *next* page can't clear, so
-    // text there ghosts gray (#2190). Force the next ordinary page onto the
-    // HALF ghost-cleanup path, which drives every pixel to its target
-    // regardless of residue.
-    pagesUntilFullRefresh = 1;
+    // The Xteink-specific two-pass image sequence (blank the image rect, fast
+    // refresh, redraw, fast refresh) is not safe on the Kobo EPDC.  Its FAST
+    // waveform can leave the first, blank frame latched on a rectangular part
+    // of the Pearl panel while the second frame is only applied elsewhere.
+    // That is exactly the half-inverted/corrupted physical page observed with
+    // Inkspell.  Keep the already composed B/W frame intact and drive it once
+    // through Kobo's complete HALF waveform.  It costs one slower page turn
+    // for pages containing images, but guarantees a coherent frame.
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    // A Kobo partial refresh cannot reliably erase the dense dark pigment of
+    // a cover/image when the next page is mostly white.  Schedule one real
+    // full waveform for that following page; HALF was visibly insufficient on
+    // the N437 and left a rectangular Inkspell afterimage.
+    fullRefreshAfterImagePage = true;
   } else if (needsAnyGrayscale) {
     if (pagesUntilFullRefresh <= 1) {
       // Cleanup turns still need the stronger HALF pass, but X3 grayscale
@@ -4377,7 +4442,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
       pagesUntilFullRefresh--;
     }
   } else {
-    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    if (fullRefreshAfterImagePage) {
+      renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+      fullRefreshAfterImagePage = false;
+      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    } else {
+      ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    }
   }
   const auto tDisplay = millis();
 

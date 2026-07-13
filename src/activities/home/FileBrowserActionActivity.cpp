@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "components/UITheme.h"
+#include "components/DirectListTouch.h"
 #include "fontIds.h"
 
 namespace {
@@ -40,6 +41,8 @@ void FileBrowserActionActivity::loop() {
     finish();
     return;
   }
+
+  consumeDirectListSelection(mappedInput, static_cast<int>(items.size()), selectedIndex);
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     setResult(FileBrowserActionResult{static_cast<int>(items[selectedIndex].action)});

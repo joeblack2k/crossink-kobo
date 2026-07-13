@@ -290,4 +290,9 @@ class BaseTheme {
   static void drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight,
                                  bool foregroundBlack = true);
   static void drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX, int boltY, bool foregroundBlack = false);
+  // A small station-Wi-Fi glyph positioned immediately left of the battery.
+  // It is intentionally absent while the radio is not actually associated.
+  static int wifiIndicatorWidth(const ThemeMetrics& metrics);
+  static bool wifiConnected();
+  static void drawWifiIndicator(const GfxRenderer& renderer, Rect rect, bool foregroundBlack = true);
 };

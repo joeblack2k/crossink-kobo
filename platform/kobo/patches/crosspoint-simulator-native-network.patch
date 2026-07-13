@@ -1,0 +1,773 @@
+diff --git a/src/Arduino.h b/src/Arduino.h
+index 309b152..d846492 100644
+--- a/src/Arduino.h
++++ b/src/Arduino.h
+@@ -36,6 +36,13 @@ inline void yield() { std::this_thread::yield(); }
+ #include "Print.h"
+ #include "WString.h"
+
++#if defined(KOBO_LINUX)
++#include <KoboSystemCompat.h>
++// The Kobo reuses Arduino surface APIs but must never inherit the simulator's
++// fixed 1 MiB heap or no-op restart semantics. Keep the same symbol shape so
++// shared sources stay portable while the implementation is Linux-backed.
++using ESPMock = crossink::kobo::KoboSystemCompat;
++#else
+ struct ESPMock {
+   uint32_t getFreeHeap() { return 1024 * 1024; }
+   void restart() {}
+@@ -43,6 +50,7 @@ struct ESPMock {
+   uint32_t getMinFreeHeap() { return 1024 * 1024; }
+   uint32_t getMaxAllocHeap() { return 1024 * 1024; }
+ };
++#endif
+ extern ESPMock ESP;
+
+ inline long random(long max) { return std::rand() % max; }
+diff --git a/src/CrossPointWebServer.cpp b/src/CrossPointWebServer.cpp
+index 6b8bf4c..13858a2 100644
+--- a/src/CrossPointWebServer.cpp
++++ b/src/CrossPointWebServer.cpp
+@@ -3,12 +3,21 @@
+ #include <HalStorage.h>
+ #include <Logging.h>
+ #include <WiFi.h>
++#include <ArduinoJson.h>
++#include <OpdsServerStore.h>
++#include <SettingsList.h>
++#include <SdCardFontSystem.h>
++#include <WifiCredentialStore.h>
++#include <KOReaderCredentialStore.h>
++#include <CrossPointSettings.h>
++#include <network/html/KoboPortalHtml.generated.h>
+ #include <arpa/inet.h>
+ #include <fcntl.h>
+ #include <netinet/in.h>
+ #include <sys/select.h>
+ #include <sys/socket.h>
+ #include <sys/time.h>
++#include <sys/statvfs.h>
+ #include <unistd.h>
+
+ #include <algorithm>
+@@ -134,6 +143,22 @@ std::string jsonEscape(const std::string &input) {
+   return out;
+ }
+
++std::string localAddressForClient(const int client) {
++  sockaddr_storage address{};
++  socklen_t length = sizeof(address);
++  if (::getsockname(client, reinterpret_cast<sockaddr *>(&address), &length) != 0) return "";
++
++  char text[INET6_ADDRSTRLEN]{};
++  const void* source = nullptr;
++  if (address.ss_family == AF_INET) {
++    source = &reinterpret_cast<const sockaddr_in*>(&address)->sin_addr;
++  } else if (address.ss_family == AF_INET6) {
++    source = &reinterpret_cast<const sockaddr_in6*>(&address)->sin6_addr;
++  }
++  if (source == nullptr || ::inet_ntop(address.ss_family, source, text, sizeof(text)) == nullptr) return "";
++  return text;
++}
++
+ std::string normalizePath(std::string path) {
+   path = urlDecode(path);
+   if (path.empty())
+@@ -228,6 +253,8 @@ void sendResponse(int client, int status, const std::string &type,
+     reason = "Precondition Failed";
+   if (status == 413)
+     reason = "Payload Too Large";
++  if (status == 415)
++    reason = "Unsupported Media Type";
+   if (status == 500)
+     reason = "Internal Server Error";
+   if (status == 501)
+@@ -550,13 +577,27 @@ std::string listFilesJson(const std::string &dirPath) {
+ }
+
+ bool writeFile(const std::string &path, const char *data, size_t size) {
++  // Keep an existing book intact until the entire transfer is durable. The
++  // Kobo data partition is a POSIX filesystem, so a same-directory rename is
++  // atomic for readers and the file browser.
++  const std::string temporaryPath = path + ".part";
++  if (Storage.exists(temporaryPath.c_str()))
++    Storage.remove(temporaryPath.c_str());
+   HalFile file;
+-  if (!Storage.openFileForWrite("WEBSIM", path.c_str(), file))
++  if (!Storage.openFileForWrite("WEBSIM", temporaryPath.c_str(), file))
+     return false;
+   const size_t written =
+       file.write(reinterpret_cast<const uint8_t *>(data), size);
+-  file.close();
+-  return written == size;
++  const bool complete = written == size && file.sync() && file.close();
++  if (!complete) {
++    Storage.remove(temporaryPath.c_str());
++    return false;
++  }
++  if (!Storage.rename(temporaryPath.c_str(), path.c_str())) {
++    Storage.remove(temporaryPath.c_str());
++    return false;
++  }
++  return Storage.syncParentDirectory(path.c_str());
+ }
+
+ std::string multipartBoundary(const Request &req) {
+@@ -613,7 +654,7 @@ std::string htmlPage() {
+ <head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+-<title>CrossPoint Reader Simulator</title>
++<title>CrossPoint voor Kobo</title>
+ <style>
+ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:24px;max-width:980px}
+ button,input{font:inherit;margin:4px}
+@@ -621,10 +662,14 @@ table{width:100%;border-collapse:collapse;margin-top:16px}
+ td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left}
+ .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+ .path{font-weight:600}
++.status{min-height:1.5em;margin:8px 4px;font-weight:600}
++.status.error{color:#a40000}.status.ok{color:#087830}
+ </style>
+ </head>
+ <body>
+-<h1>CrossPoint Reader Simulator</h1>
++<h1>CrossPoint voor Kobo</h1>
++<p>Upload hier een normaal <strong>.epub</strong>-bestand. Apple Books-mappen met
++de extensie <code>.epub</code> zijn geen uploadbare EPUB-bestanden.</p>
+ <div class="bar">
+ <button onclick="up()">Up</button>
+ <span class="path" id="path"></span>
+@@ -632,9 +677,10 @@ td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left}
+ <button onclick="mkdir()">Create folder</button>
+ </div>
+ <div class="bar">
+-<input id="file" type="file">
+-<button onclick="upload()">Upload</button>
++<input id="file" type="file" accept=".epub,application/epub+zip">
++<button id="upload" onclick="upload()">Upload EPUB</button>
+ </div>
++<div id="status" class="status" role="status" aria-live="polite"></div>
+ <table>
+ <thead><tr><th>Name</th><th>Size</th><th>Actions</th></tr></thead>
+ <tbody id="files"></tbody>
+@@ -642,6 +688,10 @@ td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left}
+ 	<script>
+ 	let path="/";
+ 	const enc=encodeURIComponent;
++	function status(message,type=""){
++	  const el=document.getElementById("status");
++	  el.textContent=message; el.className="status "+type;
++	}
+ 	function html(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+ 	function js(s){return String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'")}
+ 	function join(a,b){return (a==="/" ? "" : a)+"/"+b}
+@@ -667,11 +717,188 @@ async function mkdir(){
+   await api("/mkdir",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"path="+enc(path)+"&name="+enc(name)});
+   document.getElementById("folder").value=""; load();
+ }
++
++// The Kobo must not carry a second, hand-written portal.  The embedded page is
++// produced from web/pages/portal.* by scripts/build_web.py.
++void sendKoboPortal(int client) {
++  sendResponse(client, 200, "text/html; charset=utf-8",
++               std::string(KoboPortalHtml, KoboPortalHtmlCompressedSize),
++               "Content-Encoding: gzip\r\nCache-Control: no-cache\r\n");
++}
++
++const char* portalSection(const char* key) {
++  if (key == nullptr) return "system";
++  const std::string k(key);
++  if (k == "fontFamily" || k == "fontSize" || k == "sdFontSizeRange" || k == "lineHeightPercent" ||
++      k == "screenMargin" || k == "paragraphAlignment" || k == "embeddedStyle" || k == "hyphenationEnabled" ||
++      k == "textAntiAliasing" || k == "readerDarkMode" || k == "imageRendering" ||
++      k == "extraParagraphSpacing" || k == "forceParagraphIndents" || k == "bionicReadingEnabled" ||
++      k == "guideReadingEnabled" || k == "orientation") return "reading";
++  if (k == "frontlightBrightness" || k == "koboUiScalePercent" || k == "uiTheme" ||
++      k == "refreshFrequency" || k.find("statusBar") == 0 || k == "hideClock" ||
++      k == "hideBatteryPercentage" || k == "xtcStatusBarMode") return "display";
++  if (k == "recentBooksView" || k == "showHiddenFiles" || k == "hideFileExtension" ||
++      k == "fileBrowserDisplay" || k == "removeReadBooksFromRecents" || k == "moveFinishedToReadFolder" ||
++      k == "trackReadingStats") return "library";
++  if (k.find("PwrBtn") != std::string::npos || k.find("Button") != std::string::npos ||
++      k.find("Press") != std::string::npos || k == "pwrBtnFootnoteBack" || k == "sideButtonLayout" ||
++      k == "sideButtonOrientationAware" || k == "sideButtonLongPress") return "controls";
++  if (k.find("sleep") != std::string::npos || k.find("Sleep") != std::string::npos) return "power";
++  return "system";
++}
++
++bool portalSecret(const SettingInfo& setting) {
++  return setting.key != nullptr && std::string(setting.key) == "koPassword";
++}
++
++uint8_t enumDisplayValue(const SettingInfo& setting) {
++  const uint8_t raw = setting.valuePtr ? SETTINGS.*(setting.valuePtr) : setting.valueGetter();
++  return settingEnumDisplayIndexForRawValue(setting, raw);
++}
++
++void addSettingJson(JsonArray array, const SettingInfo& setting) {
++  if (setting.key == nullptr) return;
++  JsonObject item = array.add<JsonObject>();
++  item["key"] = setting.key;
++  item["name"] = I18N.get(setting.nameId);
++  item["category"] = I18N.get(setting.category);
++  item["section"] = portalSection(setting.key);
++  item["effect"] = std::string(setting.key) == "koboUiScalePercent" ? "reboot" : "immediate";
++  item["secret"] = portalSecret(setting);
++  switch (setting.type) {
++    case SettingType::TOGGLE:
++      item["type"] = "toggle"; item["value"] = setting.valuePtr ? (SETTINGS.*(setting.valuePtr) ? 1 : 0) : 0; break;
++    case SettingType::ENUM: {
++      item["type"] = "enum"; item["value"] = enumDisplayValue(setting);
++      JsonArray options = item["options"].to<JsonArray>();
++      for (uint8_t i = 0; i < settingEnumOptionCount(setting); ++i) options.add(settingEnumOptionLabel(setting, i));
++      break;
++    }
++    case SettingType::VALUE:
++      item["type"] = "value"; item["value"] = SETTINGS.*(setting.valuePtr); item["min"] = setting.valueRange.min;
++      item["max"] = setting.valueRange.max; item["step"] = setting.valueRange.step; break;
++    case SettingType::STRING:
++      item["type"] = "string";
++      if (portalSecret(setting)) item["hasValue"] = setting.stringGetter && !setting.stringGetter().empty();
++      else if (setting.stringGetter) item["value"] = setting.stringGetter();
++      else item["value"] = reinterpret_cast<const char*>(&SETTINGS) + setting.stringOffset;
++      break;
++    default: array.remove(array.size() - 1); break;
++  }
++}
++
++void sendPortalSettings(int client) {
++  JsonDocument doc;
++  JsonArray values = doc.to<JsonArray>();
++  for (const auto& setting : getSettingsList(&sdFontSystem.registry())) addSettingJson(values, setting);
++  std::string body; serializeJson(doc, body); sendResponse(client, 200, "application/json", body);
++}
++
++bool validatePortalSettings(JsonDocument& doc, std::string& error) {
++  for (const auto& setting : getSettingsList(&sdFontSystem.registry())) {
++    if (setting.key == nullptr || !doc[setting.key].is<JsonVariant>()) continue;
++    const JsonVariant value = doc[setting.key];
++    if (setting.type == SettingType::ENUM && (!value.is<int>() || value.as<int>() < 0 ||
++        value.as<int>() >= static_cast<int>(settingEnumOptionCount(setting)))) { error = std::string("Invalid value for ") + setting.key; return false; }
++    if (setting.type == SettingType::VALUE && (!value.is<int>() || value.as<int>() < setting.valueRange.min ||
++        value.as<int>() > setting.valueRange.max)) { error = std::string("Invalid value for ") + setting.key; return false; }
++    if (setting.type == SettingType::STRING && !value.is<const char*>()) { error = std::string("Invalid text for ") + setting.key; return false; }
++    if (setting.type == SettingType::STRING && setting.stringMaxLen > 0 &&
++        std::string(value.as<const char*>()).size() >= setting.stringMaxLen) { error = std::string("Text is too long for ") + setting.key; return false; }
++  }
++  return true;
++}
++
++void applyPortalSettings(int client, const Request& request) {
++  JsonDocument doc;
++  if (deserializeJson(doc, request.body)) { sendResponse(client, 400, "application/json", "{\"error\":\"Invalid JSON\"}"); return; }
++  std::string error;
++  if (!validatePortalSettings(doc, error)) { sendResponse(client, 400, "application/json", std::string("{\"error\":\"") + jsonEscape(error) + "\"}"); return; }
++  JsonDocument result; JsonArray applied = result["applied"].to<JsonArray>(); bool reboot = false;
++  for (const auto& setting : getSettingsList(&sdFontSystem.registry())) {
++    if (setting.key == nullptr || !doc[setting.key].is<JsonVariant>()) continue;
++    const JsonVariant value = doc[setting.key];
++    switch (setting.type) {
++      case SettingType::TOGGLE: if (setting.valuePtr) SETTINGS.*(setting.valuePtr) = value.as<int>() ? 1 : 0; break;
++      case SettingType::ENUM: if (setting.valuePtr) SETTINGS.*(setting.valuePtr) = settingEnumRawValueForDisplayIndex(setting, value.as<uint8_t>()); else if (setting.valueSetter) setting.valueSetter(value.as<uint8_t>()); break;
++      case SettingType::VALUE: if (setting.valuePtr) SETTINGS.*(setting.valuePtr) = value.as<uint8_t>(); break;
++      case SettingType::STRING: {
++        const std::string text = value.as<const char*>();
++        if (portalSecret(setting) && text.empty()) continue;
++        if (setting.stringSetter) setting.stringSetter(text);
++        else { char* target = reinterpret_cast<char*>(&SETTINGS) + setting.stringOffset; std::strncpy(target, text.c_str(), setting.stringMaxLen - 1); target[setting.stringMaxLen - 1] = '\0'; }
++        break;
++      }
++      default: continue;
++    }
++    if (std::string(setting.key) == "koboUiScalePercent") reboot = true;
++    applied.add(setting.key);
++  }
++  if (!SETTINGS.saveToFile()) { sendResponse(client, 500, "application/json", "{\"error\":\"Could not save settings\"}"); return; }
++  result["rebootRequired"] = reboot; result["reopenReaderRequired"] = false;
++  std::string body; serializeJson(result, body); sendResponse(client, 200, "application/json", body);
++}
++
++void sendPortalServices(int client, const std::string& localAddress) {
++  JsonDocument doc;
++  const std::string base = localAddress.empty() ? std::string() : "http://" + localAddress;
++  doc["webTransferEnabled"] = SETTINGS.koboWebTransferEnabled != 0;
++  doc["webUrl"] = base; doc["webdavUrl"] = base.empty() ? "" : base + "/";
++  doc["calibre"] = WiFi.status() == WL_CONNECTED ? "Available on this Wi-Fi network" : "Connect Wi-Fi first";
++  JsonObject ko = doc["koreader"].to<JsonObject>(); ko["configured"] = KOREADER_STORE.hasCredentials();
++  ko["serverUrl"] = KOREADER_STORE.getServerUrl(); ko["username"] = KOREADER_STORE.getUsername();
++  ko["hasPassword"] = !KOREADER_STORE.getPassword().empty(); ko["matchMethod"] = static_cast<uint8_t>(KOREADER_STORE.getMatchMethod());
++  std::string body; serializeJson(doc, body); sendResponse(client, 200, "application/json", body);
++}
++
++void sendPortalWifi(int client) {
++  JsonDocument doc; JsonArray values = doc.to<JsonArray>(); const auto& networks = WIFI_STORE.getCredentials();
++  for (size_t index = 0; index < networks.size(); ++index) { JsonObject item = values.add<JsonObject>(); item["id"] = std::to_string(index); item["ssid"] = networks[index].ssid; item["hasPassword"] = !networks[index].password.empty(); }
++  std::string body; serializeJson(doc, body); sendResponse(client, 200, "application/json", body);
++}
++
++void sendPortalOpds(int client) {
++  JsonDocument doc; JsonArray values = doc.to<JsonArray>(); const auto& servers = OPDS_STORE.getServers();
++  for (size_t index = 0; index < servers.size(); ++index) { const auto& server = servers[index]; JsonObject item = values.add<JsonObject>(); item["id"] = std::to_string(index); item["name"] = server.name; item["url"] = server.url; item["username"] = server.username; item["hasPassword"] = !server.password.empty(); item["filenameFormat"] = opdsFilenameFormatToJson(server.filenameFormat); item["syncAllBooks"] = server.syncAllBooks; item["primary"] = index == 0; }
++  std::string body; serializeJson(doc, body); sendResponse(client, 200, "application/json", body);
++}
++
++bool parsePortalIndex(JsonVariantConst value, size_t upper, size_t& result) {
++  const std::string id = value.as<std::string>(); char* end = nullptr; const long parsed = std::strtol(id.c_str(), &end, 10);
++  if (id.empty() || end == nullptr || *end != '\0' || parsed < 0 || static_cast<size_t>(parsed) >= upper) return false;
++  result = static_cast<size_t>(parsed); return true;
++}
++
++void savePortalOpds(int client, const Request& request) {
++  JsonDocument doc; if (deserializeJson(doc, request.body)) { sendResponse(client,400,"application/json","{\"error\":\"Invalid JSON\"}"); return; }
++  OpdsServer server; server.name = doc["name"] | std::string(); server.url = doc["url"] | std::string(); server.username = doc["username"] | std::string(); server.filenameFormat = opdsFilenameFormatFromJson(doc["filenameFormat"] | ""); server.syncAllBooks = doc["syncAllBooks"] | false;
++  if (server.name.empty() || server.url.empty()) { sendResponse(client,400,"application/json","{\"error\":\"Name and URL are required\"}"); return; }
++  bool saved = false; size_t index = 0;
++  if (doc["id"].is<JsonVariant>() && parsePortalIndex(doc["id"], OPDS_STORE.getCount(), index)) { const auto* old = OPDS_STORE.getServer(index); server.password = doc["password"].is<const char*>() && std::strlen(doc["password"].as<const char*>()) ? doc["password"].as<const char*>() : old->password; saved = OPDS_STORE.updateServer(index, server); }
++  else { server.password = doc["password"] | std::string(); saved = OPDS_STORE.addServer(server); }
++  sendResponse(client, saved ? 200 : 500, "application/json", saved ? "{\"message\":\"OPDS catalog saved\"}" : "{\"error\":\"Could not save OPDS catalog\"}");
++}
++
++void savePortalKoReader(int client, const Request& request, bool testOnly) {
++  JsonDocument doc; if (deserializeJson(doc, request.body)) { sendResponse(client,400,"application/json","{\"error\":\"Invalid JSON\"}"); return; }
++  const std::string user = doc["username"] | KOREADER_STORE.getUsername(); const std::string password = doc["password"] | std::string(); const std::string url = doc["serverUrl"] | KOREADER_STORE.getServerUrl();
++  if (testOnly) { if (url.empty() && user.empty()) { sendResponse(client,400,"application/json","{\"error\":\"Enter a server URL or credentials first\"}"); return; } sendResponse(client,200,"application/json","{\"message\":\"Configuration is valid; sync will use it on the next reader sync\"}"); return; }
++  KOREADER_STORE.setCredentials(user, password.empty() ? KOREADER_STORE.getPassword() : password); KOREADER_STORE.setServerUrl(url); KOREADER_STORE.setMatchMethod(static_cast<DocumentMatchMethod>(doc["matchMethod"] | 0));
++  sendResponse(client, KOREADER_STORE.saveToFile() ? 200 : 500, "application/json", "{\"message\":\"KOReader settings saved\"}");
++}
+ async function upload(){
+-  const file=document.getElementById("file").files[0]; if(!file)return;
+-  const data=new FormData(); data.append("file",file);
+-  await api("/upload?path="+enc(path),{method:"POST",body:data});
+-  document.getElementById("file").value=""; load();
++  const picker=document.getElementById("file");
++  const file=picker.files[0];
++  if(!file){status("Kies eerst een echt .epub-bestand; een Apple Books-map kan niet worden geüpload.","error");return;}
++  if(!file.name.toLowerCase().endsWith(".epub")){status("Alleen .epub-bestanden zijn toegestaan.","error");return;}
++  const button=document.getElementById("upload"); button.disabled=true;
++  status("Uploaden: "+file.name+" …");
++  try{
++    const data=new FormData(); data.append("file",file);
++    await api("/upload?path="+enc(path),{method:"POST",body:data});
++    picker.value=""; status("Klaar: "+file.name+" staat op de Kobo.","ok"); await load();
++  }catch(e){status("Upload mislukt: "+e.message,"error");}
++  finally{button.disabled=false;}
+ }
+ async function renameItem(name){
+   const next=prompt("New name",name); if(!next||next===name)return;
+@@ -689,6 +916,86 @@ load().catch(e=>alert(e.message));
+ </html>)HTML";
+ }
+
++// Native Kobo portal API. The ESP server is not linked into the Kobo target,
++// therefore these handlers intentionally use the same stores directly.
++void sendKoboPortal(int client) {
++  sendResponse(client, 200, "text/html; charset=utf-8", std::string(KoboPortalHtml, KoboPortalHtmlCompressedSize),
++               "Content-Encoding: gzip\r\nCache-Control: no-cache\r\n");
++}
++
++const char* portalSection(const char* key) {
++  const std::string k = key ? key : "";
++  if (k == "fontFamily" || k == "fontSize" || k == "sdFontSizeRange" || k == "lineHeightPercent" || k == "screenMargin" || k == "paragraphAlignment" || k == "embeddedStyle" || k == "hyphenationEnabled" || k == "textAntiAliasing" || k == "readerDarkMode" || k == "imageRendering" || k == "extraParagraphSpacing" || k == "forceParagraphIndents" || k == "bionicReadingEnabled" || k == "guideReadingEnabled" || k == "orientation") return "reading";
++  if (k == "frontlightBrightness" || k == "koboUiScalePercent" || k == "uiTheme" || k == "refreshFrequency" || k.find("statusBar") == 0 || k == "hideClock" || k == "hideBatteryPercentage" || k == "xtcStatusBarMode") return "display";
++  if (k == "recentBooksView" || k == "showHiddenFiles" || k == "hideFileExtension" || k == "fileBrowserDisplay" || k == "removeReadBooksFromRecents" || k == "moveFinishedToReadFolder" || k == "trackReadingStats") return "library";
++  if (k.find("PwrBtn") != std::string::npos || k.find("Button") != std::string::npos || k.find("Press") != std::string::npos || k == "pwrBtnFootnoteBack" || k == "sideButtonLayout" || k == "sideButtonOrientationAware" || k == "sideButtonLongPress") return "controls";
++  if (k.find("sleep") != std::string::npos || k.find("Sleep") != std::string::npos) return "power";
++  return "system";
++}
++
++bool isPortalSecret(const SettingInfo& setting) { return setting.key && std::string(setting.key) == "koPassword"; }
++
++void sendPortalSettings(int client) {
++  JsonDocument doc; JsonArray values = doc.to<JsonArray>();
++  for (const auto& setting : getSettingsList(&sdFontSystem.registry())) {
++    if (!setting.key) continue;
++    JsonObject item = values.add<JsonObject>(); item["key"] = setting.key; item["name"] = I18N.get(setting.nameId);
++    item["category"] = I18N.get(setting.category); item["section"] = portalSection(setting.key);
++    item["effect"] = std::string(setting.key) == "koboUiScalePercent" ? "reboot" : "immediate"; item["secret"] = isPortalSecret(setting);
++    if (setting.type == SettingType::TOGGLE) { item["type"] = "toggle"; item["value"] = setting.valuePtr ? (SETTINGS.*(setting.valuePtr) ? 1 : 0) : 0; }
++    else if (setting.type == SettingType::VALUE) { item["type"] = "value"; item["value"] = SETTINGS.*(setting.valuePtr); item["min"] = setting.valueRange.min; item["max"] = setting.valueRange.max; item["step"] = setting.valueRange.step; }
++    else if (setting.type == SettingType::ENUM) { item["type"] = "enum"; const uint8_t raw = setting.valuePtr ? SETTINGS.*(setting.valuePtr) : setting.valueGetter(); item["value"] = settingEnumDisplayIndexForRawValue(setting, raw); JsonArray options = item["options"].to<JsonArray>(); for (uint8_t i=0;i<settingEnumOptionCount(setting);++i) options.add(settingEnumOptionLabel(setting,i)); }
++    else if (setting.type == SettingType::STRING) { item["type"] = "string"; if (isPortalSecret(setting)) item["hasValue"] = setting.stringGetter && !setting.stringGetter().empty(); else if (setting.stringGetter) item["value"] = setting.stringGetter(); else item["value"] = reinterpret_cast<const char*>(&SETTINGS) + setting.stringOffset; }
++    else values.remove(values.size()-1);
++  }
++  std::string body; serializeJson(doc, body); sendResponse(client, 200, "application/json", body);
++}
++
++void applyPortalSettings(int client, const Request& request) {
++  JsonDocument doc; if (deserializeJson(doc, request.body)) { sendResponse(client,400,"application/json","{\"error\":\"Invalid JSON\"}"); return; }
++  for (const auto& setting : getSettingsList(&sdFontSystem.registry())) {
++    if (!setting.key || !doc[setting.key].is<JsonVariant>()) continue; const JsonVariant value = doc[setting.key];
++    if ((setting.type == SettingType::ENUM && (!value.is<int>() || value.as<int>() < 0 || value.as<int>() >= static_cast<int>(settingEnumOptionCount(setting)))) || (setting.type == SettingType::VALUE && (!value.is<int>() || value.as<int>() < setting.valueRange.min || value.as<int>() > setting.valueRange.max)) || (setting.type == SettingType::STRING && !value.is<const char*>())) { sendResponse(client,400,"application/json",std::string("{\"error\":\"Invalid value for ")+setting.key+"\"}"); return; }
++  }
++  JsonDocument result; JsonArray applied = result["applied"].to<JsonArray>(); bool reboot = false;
++  for (const auto& setting : getSettingsList(&sdFontSystem.registry())) {
++    if (!setting.key || !doc[setting.key].is<JsonVariant>()) continue; const JsonVariant value = doc[setting.key];
++    if (setting.type == SettingType::TOGGLE && setting.valuePtr) SETTINGS.*(setting.valuePtr) = value.as<int>() ? 1 : 0;
++    else if (setting.type == SettingType::VALUE && setting.valuePtr) SETTINGS.*(setting.valuePtr) = value.as<uint8_t>();
++    else if (setting.type == SettingType::ENUM) { if (setting.valuePtr) SETTINGS.*(setting.valuePtr) = settingEnumRawValueForDisplayIndex(setting,value.as<uint8_t>()); else if(setting.valueSetter) setting.valueSetter(value.as<uint8_t>()); }
++    else if (setting.type == SettingType::STRING) { const std::string text = value.as<const char*>(); if (isPortalSecret(setting) && text.empty()) continue; if (setting.stringSetter) setting.stringSetter(text); else { char* out = reinterpret_cast<char*>(&SETTINGS)+setting.stringOffset; std::strncpy(out,text.c_str(),setting.stringMaxLen-1); out[setting.stringMaxLen-1]='\0'; } }
++    else continue;
++    applied.add(setting.key); if (std::string(setting.key) == "koboUiScalePercent") reboot = true;
++  }
++  if (!SETTINGS.saveToFile()) { sendResponse(client,500,"application/json","{\"error\":\"Could not save settings\"}"); return; }
++  result["rebootRequired"] = reboot; result["reopenReaderRequired"] = false; std::string body; serializeJson(result,body); sendResponse(client,200,"application/json",body);
++}
++
++void sendPortalServices(int client, const std::string& address) {
++  JsonDocument doc; const std::string base = address.empty() ? "" : "http://" + address;
++  doc["webTransferEnabled"] = SETTINGS.koboWebTransferEnabled != 0; doc["webUrl"] = base; doc["webdavUrl"] = base.empty()?"":base+"/"; doc["calibre"] = WiFi.status()==WL_CONNECTED ? "Available on this Wi-Fi network" : "Connect Wi-Fi first";
++  JsonObject ko=doc["koreader"].to<JsonObject>(); ko["configured"] = KOREADER_STORE.hasCredentials(); ko["serverUrl"] = KOREADER_STORE.getServerUrl(); ko["username"] = KOREADER_STORE.getUsername(); ko["hasPassword"] = !KOREADER_STORE.getPassword().empty(); ko["matchMethod"] = static_cast<uint8_t>(KOREADER_STORE.getMatchMethod());
++  std::string body; serializeJson(doc,body); sendResponse(client,200,"application/json",body);
++}
++
++bool portalIndex(JsonVariantConst value, size_t max, size_t& index) { const std::string id=value.as<std::string>(); char* end=nullptr; const long n=std::strtol(id.c_str(),&end,10); if(id.empty()||!end||*end!='\0'||n<0||static_cast<size_t>(n)>=max)return false; index=static_cast<size_t>(n);return true; }
++
++// OPDS is the only portal collection whose order is user-editable. Never use
++// an array index as its identity: making another server primary must not make
++// a later save/delete address a different library.
++bool portalOpdsIndex(JsonVariantConst value, size_t& index) {
++  if (!value.is<const char*>()) return false;
++  index = OPDS_STORE.indexForId(value.as<const char*>());
++  return index < OPDS_STORE.getCount();
++}
++
++void sendPortalWifi(int client) { JsonDocument doc; JsonArray values=doc.to<JsonArray>(); const auto& all=WIFI_STORE.getCredentials(); for(size_t i=0;i<all.size();++i){JsonObject v=values.add<JsonObject>();v["id"]=std::to_string(i);v["ssid"]=all[i].ssid;v["hasPassword"]=!all[i].password.empty();}std::string body;serializeJson(doc,body);sendResponse(client,200,"application/json",body); }
++void sendPortalOpds(int client) { JsonDocument doc; JsonArray values=doc.to<JsonArray>();const auto& all=OPDS_STORE.getServers();for(size_t i=0;i<all.size();++i){JsonObject v=values.add<JsonObject>();v["id"]=all[i].id;v["name"]=all[i].name;v["url"]=all[i].url;v["username"]=all[i].username;v["hasPassword"]=!all[i].password.empty();v["filenameFormat"]=opdsFilenameFormatToJson(all[i].filenameFormat);v["syncAllBooks"]=all[i].syncAllBooks;v["primary"]=(i==0);}std::string body;serializeJson(doc,body);sendResponse(client,200,"application/json",body); }
++
++void savePortalOpds(int client,const Request& request){JsonDocument doc;if(deserializeJson(doc,request.body)){sendResponse(client,400,"application/json","{\"error\":\"Invalid JSON\"}");return;}OpdsServer s;s.name=doc["name"]|std::string();s.url=doc["url"]|std::string();s.username=doc["username"]|std::string();s.filenameFormat=opdsFilenameFormatFromJson(doc["filenameFormat"]|"");s.syncAllBooks=doc["syncAllBooks"]|false;if(s.name.empty()||s.url.empty()){sendResponse(client,400,"application/json","{\"error\":\"Name and URL are required\"}");return;}size_t i=0;bool ok=false;if(doc["id"].is<JsonVariant>()){if(!portalOpdsIndex(doc["id"],i)){sendResponse(client,400,"application/json","{\"error\":\"Unknown OPDS catalog\"}");return;}const auto* old=OPDS_STORE.getServer(i);s.password=(doc["password"].is<const char*>()&&std::strlen(doc["password"].as<const char*>()))?doc["password"].as<const char*>():old->password;ok=OPDS_STORE.updateServer(i,s);}else{s.password=doc["password"]|std::string();ok=OPDS_STORE.addServer(s);}sendResponse(client,ok?200:500,"application/json",ok?"{\"message\":\"OPDS catalog saved\"}":"{\"error\":\"Could not save OPDS catalog\"}");}
++
++void savePortalKoReader(int client,const Request& request,bool test){JsonDocument doc;if(deserializeJson(doc,request.body)){sendResponse(client,400,"application/json","{\"error\":\"Invalid JSON\"}");return;}if(test){sendResponse(client,200,"application/json","{\"message\":\"Configuration is valid\"}");return;}const std::string user=doc["username"]|KOREADER_STORE.getUsername();const std::string password=doc["password"]|std::string();KOREADER_STORE.setCredentials(user,password.empty()?KOREADER_STORE.getPassword():password);KOREADER_STORE.setServerUrl(doc["serverUrl"]|KOREADER_STORE.getServerUrl());KOREADER_STORE.setMatchMethod(static_cast<DocumentMatchMethod>(doc["matchMethod"]|0));sendResponse(client,KOREADER_STORE.saveToFile()?200:500,"application/json","{\"message\":\"KOReader settings saved\"}");}
++
+ void handleDownload(int client, const std::string &path) {
+   if (path.empty() || path == "/" || isProtectedPath(path) ||
+       !Storage.exists(path.c_str())) {
+@@ -731,6 +1038,69 @@ void handleDownloadHead(int client, const std::string &path, HalFile &file) {
+   sendAll(client, headers.str());
+ }
+
++void handleGetOpdsServers(int client) {
++  JsonDocument doc;
++  JsonArray servers = doc.to<JsonArray>();
++  for (const auto &server : OPDS_STORE.getServers()) {
++    JsonObject item = servers.add<JsonObject>();
++    item["name"] = server.name;
++    item["url"] = server.url;
++    item["username"] = server.username;
++    item["hasPassword"] = !server.password.empty();
++    item["filenameFormat"] = opdsFilenameFormatToJson(server.filenameFormat);
++  }
++  std::string body;
++  serializeJson(doc, body);
++  sendResponse(client, 200, "application/json", body);
++}
++
++void handlePostOpdsServer(int client, const Request &req) {
++  JsonDocument doc;
++  if (deserializeJson(doc, req.body)) {
++    sendResponse(client, 400, "text/plain", "Invalid JSON");
++    return;
++  }
++
++  OpdsServer server;
++  server.name = doc["name"] | std::string{};
++  server.url = doc["url"] | std::string{};
++  server.username = doc["username"] | std::string{};
++  server.password = doc["password"] | std::string{};
++  server.filenameFormat = opdsFilenameFormatFromJson(doc["filenameFormat"] | "");
++  if (server.url.empty() || server.url.size() > 127 || server.name.size() > 63 || server.username.size() > 63 ||
++      server.password.size() > 63) {
++    sendResponse(client, 400, "text/plain", "Invalid OPDS server fields");
++    return;
++  }
++
++  bool saved = false;
++  if (doc["index"].is<int>()) {
++    const int index = doc["index"].as<int>();
++    if (index < 0 || index >= static_cast<int>(OPDS_STORE.getCount())) {
++      sendResponse(client, 400, "text/plain", "Invalid server index");
++      return;
++    }
++    const OpdsServer *existing = OPDS_STORE.getServer(static_cast<size_t>(index));
++    if (existing != nullptr && !doc["password"].is<const char *>()) {
++      server.password = existing->password;
++    }
++    if (existing != nullptr && !doc["filenameFormat"].is<const char *>()) {
++      server.filenameFormat = existing->filenameFormat;
++    }
++    saved = OPDS_STORE.updateServer(static_cast<size_t>(index), server);
++  } else {
++    saved = OPDS_STORE.addServer(server);
++  }
++
++  if (!saved) {
++    sendResponse(client, 500, "text/plain", "Could not save OPDS server");
++    return;
++  }
++  // Never include the password in a response or log entry.
++  LOG_INF("WEB", "Native OPDS server configuration saved: %s", server.name.c_str());
++  sendResponse(client, 200, "text/plain", "OK");
++}
++
+ void handleClientRequest(CrossPointWebServer *owner, NativeServerState &state,
+                          int client) {
+   Request req;
+@@ -774,17 +1144,76 @@ void handleClientRequest(CrossPointWebServer *owner, NativeServerState &state,
+                  propfindXml(path, depth), "DAV: 1\r\n");
+     return;
+   }
+-  if (req.method == "GET" && (req.path == "/" || req.path == "/files")) {
+-    sendResponse(client, 200, "text/html; charset=utf-8", htmlPage());
++  if (req.method == "GET" && (req.path == "/" || req.path == "/files" || req.path == "/settings" || req.path == "/fonts")) {
++    sendKoboPortal(client);
+     return;
+   }
+   if (req.method == "GET" && req.path == "/api/status") {
+-    const std::string body = std::string("{\"version\":\"") +
+-                             CROSSPOINT_VERSION +
+-                             "\",\"ip\":\"127.0.0.1\",\"mode\":\"SIM\"}";
++    const std::string localAddress = localAddressForClient(client);
++#ifdef KOBO_LINUX
++    const char* const mode = "KOBO";
++#else
++    const char* const mode = "SIM";
++#endif
++    JsonDocument doc;
++    doc["version"] = CROSSPOINT_VERSION;
++    doc["ip"] = localAddress.empty() ? "unknown" : localAddress;
++    doc["mode"] = mode;
++    doc["device"] = "Kobo Glo HD";
++    doc["wifi"] = WiFi.status() == WL_CONNECTED ? WiFi.SSID().c_str() : "Offline";
++    doc["frontlight"] = SETTINGS.frontlightBrightness;
++    struct statvfs fs{};
++    if (::statvfs("/data", &fs) == 0) {
++      const unsigned long long freeBytes = static_cast<unsigned long long>(fs.f_bavail) * fs.f_frsize;
++      doc["storageFree"] = std::to_string(freeBytes / (1024ULL * 1024ULL)) + " MB free";
++    }
++    std::string body; serializeJson(doc, body);
+     sendResponse(client, 200, "application/json", body);
+     return;
+   }
++  if (req.method == "GET" && req.path == "/api/settings") { sendPortalSettings(client); return; }
++  if (req.method == "POST" && (req.path == "/api/settings/apply" || req.path == "/api/settings")) { applyPortalSettings(client, req); return; }
++  if (req.method == "GET" && req.path == "/api/network/services") { sendPortalServices(client, localAddressForClient(client)); return; }
++  if (req.method == "GET" && req.path == "/api/wifi") { sendPortalWifi(client); return; }
++  if (req.method == "POST" && req.path == "/api/wifi") {
++    JsonDocument doc; size_t index = 0;
++    if (deserializeJson(doc, req.body)) { sendResponse(client, 400, "application/json", "{\"error\":\"Invalid JSON\"}"); return; }
++    const std::string ssid = doc["ssid"] | std::string();
++    if (ssid.empty()) { sendResponse(client, 400, "application/json", "{\"error\":\"SSID is required\"}"); return; }
++    const std::string password = doc["password"] | std::string();
++    bool saved = false;
++    if (doc["id"].is<JsonVariant>() && portalIndex(doc["id"], WIFI_STORE.getCredentials().size(), index)) {
++      const auto& old = WIFI_STORE.getCredentials()[index];
++      const std::string effectivePassword = password.empty() ? old.password : password;
++      saved = (old.ssid == ssid || WIFI_STORE.removeCredential(old.ssid)) && WIFI_STORE.addCredential(ssid, effectivePassword);
++    } else saved = WIFI_STORE.addCredential(ssid, password);
++    sendResponse(client, saved ? 200 : 500, "application/json", saved ? "{\"message\":\"Wi-Fi network saved\"}" : "{\"error\":\"Could not save Wi-Fi network\"}");
++    return;
++  }
++  if (req.method == "POST" && req.path == "/api/wifi/delete") {
++    JsonDocument doc; size_t index = 0;
++    if (deserializeJson(doc, req.body) || !portalIndex(doc["id"], WIFI_STORE.getCredentials().size(), index) || !WIFI_STORE.removeCredential(WIFI_STORE.getCredentials()[index].ssid)) sendResponse(client, 400, "application/json", "{\"error\":\"Could not delete Wi-Fi network\"}");
++    else sendResponse(client, 200, "application/json", "{\"message\":\"Wi-Fi network deleted\"}");
++    return;
++  }
++  if (req.method == "GET" && req.path == "/api/opds") { sendPortalOpds(client); return; }
++  if (req.method == "POST" && req.path == "/api/opds") { savePortalOpds(client, req); return; }
++  if (req.method == "POST" && req.path == "/api/opds/test") { sendResponse(client, 200, "application/json", "{\"message\":\"OPDS configuration is valid\"}"); return; }
++  if (req.method == "POST" && req.path == "/api/opds/primary") {
++    JsonDocument doc; size_t index = 0;
++    if (deserializeJson(doc, req.body) || !portalOpdsIndex(doc["id"], index) || !OPDS_STORE.makePrimary(index)) {
++      sendResponse(client, 400, "application/json", "{\"error\":\"Could not set primary catalog\"}");
++    } else sendResponse(client, 200, "application/json", "{\"message\":\"Primary OPDS catalog updated\"}");
++    return;
++  }
++  if (req.method == "POST" && req.path == "/api/opds/delete") {
++    JsonDocument doc; size_t index = 0;
++    if (deserializeJson(doc, req.body) || !portalOpdsIndex(doc["id"], index) || !OPDS_STORE.removeServer(index)) sendResponse(client, 400, "application/json", "{\"error\":\"Could not delete OPDS catalog\"}");
++    else sendResponse(client, 200, "application/json", "{\"message\":\"OPDS catalog deleted\"}");
++    return;
++  }
++  if (req.method == "POST" && req.path == "/api/koreader") { savePortalKoReader(client, req, false); return; }
++  if (req.method == "POST" && req.path == "/api/koreader/test") { savePortalKoReader(client, req, true); return; }
+   if (req.method == "GET" && req.path == "/api/files") {
+     const std::string path = normalizePath(queryValue(req, "path", "/"));
+     if (path.empty() || isProtectedPath(path)) {
+@@ -827,6 +1256,15 @@ void handleClientRequest(CrossPointWebServer *owner, NativeServerState &state,
+       return;
+     }
+     std::string dir = normalizePath(queryValue(req, "path", "/"));
++#ifdef KOBO_LINUX
++    // The permanent Kobo transfer service is an EPUB inbox, never a raw
++    // browser for the rootfs/state partition. Ignore legacy UI path values.
++    if (filename.size() < 5 || lower(filename.substr(filename.size() - 5)) != ".epub") {
++      sendResponse(client, 415, "text/plain", "Only EPUB files can be uploaded");
++      return;
++    }
++    dir = "/Books";
++#endif
+     if (dir.empty() || isProtectedPath(dir)) {
+       sendResponse(client, 403, "text/plain", "Forbidden");
+       return;
+@@ -999,7 +1437,13 @@ void acceptLoop(CrossPointWebServer *owner, NativeServerState *state) {
+ }
+ } // namespace
+
+-CrossPointWebServer::CrossPointWebServer() { port = SIMULATOR_WEB_PORT; }
++CrossPointWebServer::CrossPointWebServer() {
++#ifdef CROSSPOINT_NATIVE_WEB_PORT
++  port = CROSSPOINT_NATIVE_WEB_PORT;
++#else
++  port = SIMULATOR_WEB_PORT;
++#endif
++}
+
+ CrossPointWebServer::~CrossPointWebServer() { stop(); }
+
+@@ -1019,11 +1463,15 @@ void CrossPointWebServer::begin() {
+
+   sockaddr_in addr{};
+   addr.sin_family = AF_INET;
++#ifdef CROSSPOINT_NATIVE_BIND_ANY
++  addr.sin_addr.s_addr = htonl(INADDR_ANY);
++#else
+   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++#endif
+   addr.sin_port = htons(port);
+
+   if (bind(state->fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+-    LOG_ERR("WEB", "[SIM] bind 127.0.0.1:%d failed: %s", port, strerror(errno));
++    LOG_ERR("WEB", "[NATIVE] bind port %d failed: %s", port, strerror(errno));
+     close(state->fd);
+     return;
+   }
+@@ -1041,8 +1489,7 @@ void CrossPointWebServer::begin() {
+   }
+   running = true;
+   statePtr->worker = std::thread(acceptLoop, this, statePtr);
+-  LOG_DBG("WEB", "[SIM] File transfer server running at http://127.0.0.1:%d/",
+-          port);
++  LOG_DBG("WEB", "[NATIVE] File transfer server running on port %d", port);
+ }
+
+ void CrossPointWebServer::stop() {
+diff --git a/src/DNSServer.h b/src/DNSServer.h
+index 6a5272a..c557aa7 100644
+--- a/src/DNSServer.h
++++ b/src/DNSServer.h
+@@ -1,5 +1,5 @@
+ #pragma once
+-#include "WiFi.h"
++#include <WiFi.h>
+ enum DNSReplyCode {
+   NoError = 0,
+   FormError = 1,
+diff --git a/src/ESP.cpp b/src/ESP.cpp
+index cadd0fc..04878bd 100644
+--- a/src/ESP.cpp
++++ b/src/ESP.cpp
+@@ -1,6 +1,6 @@
+ #include "Arduino.h"
+ #include "ESPmDNS.h"
+-#include "WiFi.h"
++#include <WiFi.h>
+
+ class SPIClass {};
+ class FS {};
+diff --git a/src/HalStorage.cpp b/src/HalStorage.cpp
+index fa04604..15bb3d4 100644
+--- a/src/HalStorage.cpp
++++ b/src/HalStorage.cpp
+@@ -349,6 +349,18 @@ bool HalStorage::rename(const char *oldPath, const char *newPath) {
+   ensureParentDirectories(n);
+   return ::rename(o.c_str(), n.c_str()) == 0;
+ }
++bool HalStorage::syncParentDirectory(const char *path) {
++  const std::string full = resolveStoragePath(path);
++  if (full.empty()) return false;
++  const std::size_t slash = full.find_last_of('/');
++  if (slash == std::string::npos) return false;
++  const std::string parent = slash == 0 ? std::string("/") : full.substr(0, slash);
++  const int descriptor = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++  if (descriptor < 0) return false;
++  const bool synced = ::fsync(descriptor) == 0;
++  const int closeResult = ::close(descriptor);
++  return synced && closeResult == 0;
++}
+ static bool removeDirRecursive(const std::string &full) {
+   DIR *d = opendir(full.c_str());
+   if (!d)
+@@ -390,7 +402,12 @@ String HalStorage::readFile(const char *path) {
+     return String("");
+   size_t s = f.size();
+   std::string content(s, '\0');
+-  f.read((void *)content.data(), s);
++  size_t consumed = 0;
++  while (consumed < s) {
++    const int count = f.read(content.data() + consumed, s - consumed);
++    if (count <= 0) return String("");
++    consumed += static_cast<size_t>(count);
++  }
+   return String(content);
+ }
+ bool HalStorage::readFileToStream(const char *path, Print &out,
+diff --git a/src/HalStorage.h b/src/HalStorage.h
+index 9cab192..d07e7d6 100644
+--- a/src/HalStorage.h
++++ b/src/HalStorage.h
+@@ -43,6 +43,10 @@ public:
+   bool exists(const char *path);
+   bool remove(const char *path);
+   bool rename(const char *oldPath, const char *newPath);
++  // Persist metadata for a file replacement in its containing directory.
++  // Call this after a same-directory rename when the new name must survive a
++  // sudden reboot/power loss as well as a clean process exit.
++  bool syncParentDirectory(const char *path);
+   bool rmdir(const char *path);
+
+   bool openFileForRead(const char *moduleName, const char *path, HalFile &file);
+diff --git a/src/NetworkUdp.h b/src/NetworkUdp.h
+index cd53a6d..3669234 100644
+--- a/src/NetworkUdp.h
++++ b/src/NetworkUdp.h
+@@ -2,7 +2,7 @@
+ #include <cstddef>
+ #include <cstdint>
+
+-#include "WiFi.h" // for IPAddress
++#include <WiFi.h> // for IPAddress
+
+ class NetworkUDP {
+ public:
+diff --git a/src/WebSocketsServer.cpp b/src/WebSocketsServer.cpp
+index a4d561c..321226e 100644
+--- a/src/WebSocketsServer.cpp
++++ b/src/WebSocketsServer.cpp
+@@ -344,11 +344,15 @@ void WebSocketsServer::begin() {
+
+   sockaddr_in addr{};
+   addr.sin_family = AF_INET;
++#ifdef CROSSPOINT_NATIVE_BIND_ANY
++  addr.sin_addr.s_addr = htonl(INADDR_ANY);
++#else
+   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++#endif
+   addr.sin_port = htons(impl_->port);
+   if (::bind(impl_->fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) !=
+       0) {
+-    LOG_ERR("WS", "[SIM] WebSocket bind 127.0.0.1:%d failed: %s", impl_->port,
++    LOG_ERR("WS", "[NATIVE] WebSocket bind port %d failed: %s", impl_->port,
+             strerror(errno));
+     ::close(impl_->fd);
+     impl_->fd = -1;
+@@ -449,8 +453,7 @@ void WebSocketsServer::begin() {
+     }
+   });
+
+-  LOG_DBG("WS", "[SIM] WebSocket server running at ws://127.0.0.1:%d/",
+-          impl_->port);
++  LOG_DBG("WS", "[NATIVE] WebSocket server running on port %d", impl_->port);
+ }
+
+ void WebSocketsServer::loop() {

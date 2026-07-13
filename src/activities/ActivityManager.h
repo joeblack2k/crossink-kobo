@@ -1,8 +1,12 @@
 #pragma once
 
+#if defined(KOBO_LINUX)
+#include <KoboRenderScheduler.h>
+#else
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
+#endif
 
 #include <atomic>
 #include <cassert>
@@ -14,7 +18,7 @@
 #include "MappedInputManager.h"
 #include "util/ScreenshotInfo.h"
 
-#ifndef portMUX_INITIALIZER_UNLOCKED
+#if !defined(KOBO_LINUX) && !defined(portMUX_INITIALIZER_UNLOCKED)
 struct portMUX_TYPE {};
 #define portMUX_INITIALIZER_UNLOCKED \
   {                                  \
@@ -57,11 +61,17 @@ class ActivityManager {
   enum class PendingAction { None, Push, Pop, Replace };
   PendingAction pendingAction = PendingAction::None;
 
-  // Task to render and display the activity
+  // Task to render and display the activity. Kobo has a dedicated POSIX
+  // scheduler; ESP keeps the original FreeRTOS implementation.
+#if defined(KOBO_LINUX)
+  crossink::kobo::KoboRenderScheduler renderScheduler;
+#else
   TaskHandle_t renderTaskHandle = nullptr;
+#endif
   static void renderTaskTrampoline(void* param);
-  [[noreturn]] virtual void renderTaskLoop();
+  virtual void renderTaskLoop();
 
+#if !defined(KOBO_LINUX)
   // Set by requestUpdateAndWait(); read and cleared by the render task after render completes.
   // Note: only one waiting task is supported at a time
   TaskHandle_t waitingTaskHandle = nullptr;
@@ -70,6 +80,7 @@ class ActivityManager {
   // Mutex to protect rendering operations from race conditions
   // Must only be used via RenderLock
   SemaphoreHandle_t renderingMutex = nullptr;
+#endif
 
   // Whether to trigger a render after the current loop()
   // This variable must only be set by the main loop, to avoid race conditions
@@ -77,8 +88,14 @@ class ActivityManager {
 
  public:
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
+#if defined(KOBO_LINUX)
+      : renderer(renderer), mappedInput(mappedInput) {
+#else
       : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateMutex()) {
+#endif
+#if !defined(KOBO_LINUX)
     assert(renderingMutex != nullptr && "Failed to create rendering mutex");
+#endif
     stackActivities.reserve(10);
   }
   ~ActivityManager() { assert(false); /* should never be called */ };
@@ -98,6 +115,9 @@ class ActivityManager {
   void goToSettings();
   void goToFileBrowser(std::string path = {});
   void goToRecentBooks();
+  void goToLibrarySeries();
+  void goToLibraryCollections();
+  void goToLibrary(bool forceRefresh = false);
   void goToBrowser();
   void goToReader(std::string path, bool suppressBackRelease = false);
   void goToSleep(bool fromTimeout = false);

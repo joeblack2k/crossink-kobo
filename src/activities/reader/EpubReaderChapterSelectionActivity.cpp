@@ -4,6 +4,7 @@
 #include <I18n.h>
 
 #include "MappedInputManager.h"
+#include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -30,6 +31,8 @@ void EpubReaderChapterSelectionActivity::onExit() { Activity::onExit(); }
 void EpubReaderChapterSelectionActivity::loop() {
   const int pageItems = UITheme::getInstance().getNumberOfItemsPerPage(renderer, true, false, true, false);
   const int totalItems = getTotalItems();
+
+  consumeDirectListSelection(mappedInput, totalItems, selectorIndex);
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     const auto tocItem = epub->getTocItem(selectorIndex);

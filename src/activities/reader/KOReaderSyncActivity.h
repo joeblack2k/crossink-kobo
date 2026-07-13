@@ -81,9 +81,8 @@ class KOReaderSyncActivity final : public Activity {
   int selectedOption = 0;
 
   // Tracks whether this session activated WiFi. Set in onEnter past the credentials
-  // check; checked in onExit to decide whether to silent-reboot. Can't rely on
-  // WiFi.getMode() because performUpload() calls esp_wifi_stop() on the way out,
-  // which makes WiFi.getMode() return WIFI_MODE_NULL.
+  // check; ESP uses it to decide whether to silent-reboot on exit. Kobo keeps
+  // the Linux station service alive and deliberately does neither.
   bool wifiActivated = false;
   bool lockInitialConfirmRelease = false;
 

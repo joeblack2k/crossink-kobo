@@ -5,8 +5,10 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
+#if !defined(KOBO_LINUX)
 #include <esp_sntp.h>
 #include <esp_wifi.h>
+#endif
 
 #include <algorithm>
 #include <cassert>
@@ -26,6 +28,14 @@
 #include "fontIds.h"
 
 namespace {
+#ifdef KOBO_LINUX
+void syncTimeWithNTP() {
+  // Kobo's system clock is maintained by the Linux network stack.  The ESP
+  // SNTP loop and its FreeRTOS delay have neither a device nor a lifecycle
+  // equivalent here, so progress sync must not create a second clock worker.
+  LOG_DBG("KOSync", "Using Kobo system clock for progress sync");
+}
+#else
 void syncTimeWithNTP() {
   // Stop SNTP if already running (can't reconfigure while running)
   if (esp_sntp_enabled()) {
@@ -51,8 +61,15 @@ void syncTimeWithNTP() {
     LOG_DBG("KOSync", "NTP sync timeout, using fallback");
   }
 }
+#endif
 
 void wifiOff() {
+#ifdef KOBO_LINUX
+  // Kobo owns a persistent station connection and transfer service.  ESP-NOW
+  // and FreeRTOS cleanup are irrelevant here, so a progress sync must never
+  // tear the radio down on exit.
+  return;
+#else
   if (esp_sntp_enabled()) {
     esp_sntp_stop();
   }
@@ -60,6 +77,7 @@ void wifiOff() {
   delay(100);
   WiFi.mode(WIFI_OFF);
   delay(100);
+#endif
 }
 }  // namespace
 
@@ -369,10 +387,12 @@ void KOReaderSyncActivity::onEnter() {
 void KOReaderSyncActivity::onExit() {
   Activity::onExit();
 
+#ifndef KOBO_LINUX
   if (wifiActivated) {
     wifiOff();
     silentRestartToReader();
   }
+#endif
 }
 
 void KOReaderSyncActivity::render(RenderLock&&) {

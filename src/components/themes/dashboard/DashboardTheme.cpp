@@ -19,6 +19,7 @@
 #include "activities/reader/BookReadingStats.h"
 #include "activities/reader/GlobalReadingStats.h"
 #include "activities/reader/ReadingStatsUtils.h"
+#include "components/KoboIconMetrics.h"
 #include "components/UITheme.h"
 #include "components/icons/afternoon.h"
 #include "components/icons/book24.h"
@@ -28,6 +29,7 @@
 #include "components/icons/night.h"
 #include "components/icons/streak.h"
 #include "fontIds.h"
+#include "platform/DeviceCapabilities.h"
 
 namespace {
 constexpr int kContentInsetX4 = 20;
@@ -53,13 +55,19 @@ bool isWideScreen(const GfxRenderer& renderer) { return renderer.getScreenWidth(
 
 int contentInset(const GfxRenderer& renderer) { return isWideScreen(renderer) ? kContentInsetX3 : kContentInsetX4; }
 
+int footerIconSize() {
+  return KoboIconMetrics::scaledAssetSize(
+      kFooterIconSize, std::max(kFooterIconSize, UITheme::getInstance().getMetrics().menuRowHeight / 2));
+}
+
 Rect coverRectForScreen(const GfxRenderer& renderer, const Rect& rect) {
   const int inset = contentInset(renderer);
   const int statsW = isWideScreen(renderer) ? kStatsColumnWidthWide : kStatsColumnWidth;
   const int maxCoverW = renderer.getScreenWidth() - inset * 2 - statsW - kCoverStatsGap;
   const int coverW = std::min(DashboardMetrics::homeCoverImageWidth, maxCoverW);
   const int coverH = std::min(DashboardMetrics::homeCoverImageHeight, (coverW * 3) / 2);
-  return Rect{inset + (gpio.deviceIsX3() ? kPairInwardShiftX3 : 0), rect.y + kTopInset, coverW, coverH};
+  return Rect{inset + (crossink::platform::deviceCapabilities(gpio).sideButtonsAreHorizontal ? kPairInwardShiftX3 : 0),
+              rect.y + kTopInset, coverW, coverH};
 }
 
 Rect fittedBitmapRect(const Bitmap& bitmap, const Rect& target) {
@@ -94,8 +102,11 @@ void drawMissingBookCover(const GfxRenderer& renderer, const Rect& coverRect, co
                            Color::White);
   renderer.drawRoundedRect(coverRect.x, coverRect.y, coverRect.width, coverRect.height, 1, kCoverCornerRadius, true);
 
-  constexpr int iconSize = 32;
-  renderer.drawIcon(CoverIcon, coverRect.x + (coverRect.width - iconSize) / 2, coverRect.y + 36, iconSize, iconSize);
+  constexpr int sourceIconSize = 32;
+  const int iconSize = KoboIconMetrics::coverPlaceholderSize(sourceIconSize, coverRect.width, coverRect.height);
+  KoboIconMetrics::drawScaledSquare(renderer, CoverIcon, coverRect.x + (coverRect.width - iconSize) / 2,
+                                    coverRect.y + std::max(8, (coverRect.height / 3 - iconSize) / 2), sourceIconSize,
+                                    iconSize);
 
   constexpr int textPadding = 14;
   const int textW = coverRect.width - textPadding * 2;
@@ -246,9 +257,11 @@ void drawStatsRow(const GfxRenderer& renderer, const int rightX, const int y, co
 
 void drawDashboardStats(const GfxRenderer& renderer, const Rect& coverRect, const BookReadingStats* stats,
                         const float progressPercent, const bool black = true) {
-  const int rightX = renderer.getScreenWidth() - contentInset(renderer) - (gpio.deviceIsX3() ? kPairInwardShiftX3 : 0);
+  const auto capabilities = crossink::platform::deviceCapabilities(gpio);
+  const int rightX = renderer.getScreenWidth() - contentInset(renderer) -
+                     (capabilities.sideButtonsAreHorizontal ? kPairInwardShiftX3 : 0);
   const int blockH = statsBlockHeight(renderer);
-  const bool showRtcStats = gpio.deviceIsX3();
+  const bool showRtcStats = capabilities.hasRtc;
   const int rowCount = showRtcStats ? kStatsRowCount : kStatsRowCountX4;
   const BookReadingStats emptyStats{};
   const BookReadingStats& bookStats = stats != nullptr ? *stats : emptyStats;
@@ -420,28 +433,30 @@ void formatStreakStat(const GlobalReadingStats* globalStats, char* buf, const si
 
 void drawIconLabel(const GfxRenderer& renderer, const uint8_t* icon, const int iconX, const int centerY,
                    const char* label, const int maxTextW, const bool inverted = false) {
+  const int iconSize = footerIconSize();
   const std::string visibleLabel = renderer.truncatedText(UI_10_FONT_ID, label, maxTextW);
   const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
   if (inverted) {
-    renderer.drawIconInverted(icon, iconX, centerY - kFooterIconSize / 2, kFooterIconSize, kFooterIconSize);
+    KoboIconMetrics::drawScaledSquare(renderer, icon, iconX, centerY - iconSize / 2, kFooterIconSize, iconSize, false);
   } else {
-    renderer.drawIcon(icon, iconX, centerY - kFooterIconSize / 2, kFooterIconSize, kFooterIconSize);
+    KoboIconMetrics::drawScaledSquare(renderer, icon, iconX, centerY - iconSize / 2, kFooterIconSize, iconSize);
   }
-  renderer.drawText(UI_10_FONT_ID, iconX + kFooterIconSize + kFooterIconTextGap, centerY - lineH / 2,
-                    visibleLabel.c_str(), !inverted);
+  renderer.drawText(UI_10_FONT_ID, iconX + iconSize + kFooterIconTextGap, centerY - lineH / 2, visibleLabel.c_str(),
+                    !inverted);
 }
 
 void drawRightAlignedIconLabel(const GfxRenderer& renderer, const uint8_t* icon, const int rightX, const int centerY,
                                const char* label, const int maxTextW, const bool inverted = false) {
+  const int iconSize = footerIconSize();
   const std::string visibleLabel = renderer.truncatedText(UI_10_FONT_ID, label, maxTextW);
   const int labelW = renderer.getTextWidth(UI_10_FONT_ID, visibleLabel.c_str());
   const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
   const int textX = rightX - labelW;
-  const int iconX = textX - kFooterIconTextGap - kFooterIconSize;
+  const int iconX = textX - kFooterIconTextGap - iconSize;
   if (inverted) {
-    renderer.drawIconInverted(icon, iconX, centerY - kFooterIconSize / 2, kFooterIconSize, kFooterIconSize);
+    KoboIconMetrics::drawScaledSquare(renderer, icon, iconX, centerY - iconSize / 2, kFooterIconSize, iconSize, false);
   } else {
-    renderer.drawIcon(icon, iconX, centerY - kFooterIconSize / 2, kFooterIconSize, kFooterIconSize);
+    KoboIconMetrics::drawScaledSquare(renderer, icon, iconX, centerY - iconSize / 2, kFooterIconSize, iconSize);
   }
   renderer.drawText(UI_10_FONT_ID, textX, centerY - lineH / 2, visibleLabel.c_str(), !inverted);
 }
@@ -480,7 +495,7 @@ void drawFooterStats(const GfxRenderer& renderer, const Rect& coverRect, const G
   const int footerY = renderer.getScreenHeight() - DashboardMetrics::values.buttonHintsHeight - kFooterBottomGap;
   const int centerY = std::max(coverRect.y + coverRect.height + 120, footerY);
 
-  if (gpio.deviceIsX4()) {
+  if (crossink::platform::deviceCapabilities(gpio).hasFrontButtons) {
     char totalTime[40];
     char booksRead[16];
     const uint32_t totalReadingSeconds = globalStats != nullptr ? globalStats->totalReadingSeconds : 0;
@@ -500,12 +515,13 @@ void drawFooterStats(const GfxRenderer& renderer, const Rect& coverRect, const G
   char streakBuf[48];
   formatStreakStat(globalStats, streakBuf, sizeof(streakBuf));
 
-  const int leftTextW = renderer.getScreenWidth() / 2 - inset - kFooterIconSize - kFooterIconTextGap;
+  const int footerIcon = footerIconSize();
+  const int leftTextW = renderer.getScreenWidth() / 2 - inset - footerIcon - kFooterIconTextGap;
   drawIconLabel(renderer, StreakIcon, coverRect.x, centerY, streakBuf, leftTextW, inverted);
 
   const char* readerLabel = readerTypeLabel(globalStats);
   const int rightX = renderer.getScreenWidth() - inset - kPairInwardShiftX3;
-  const int maxReaderTextW = std::max(1, renderer.getScreenWidth() / 2 - inset - kFooterIconSize - kFooterIconTextGap);
+  const int maxReaderTextW = std::max(1, renderer.getScreenWidth() / 2 - inset - footerIcon - kFooterIconTextGap);
   drawRightAlignedIconLabel(renderer, readerTypeIcon(globalStats), rightX, centerY, readerLabel, maxReaderTextW,
                             inverted);
 }

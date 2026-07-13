@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "RecentBooksStore.h"
+#include "components/KoboIconMetrics.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
@@ -75,7 +76,14 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
                             tileY + hPaddingInSelection + (Lyra3CoversMetrics::values.homeCoverHeight / 3),
                             tileWidth - 2 * hPaddingInSelection, 2 * Lyra3CoversMetrics::values.homeCoverHeight / 3,
                             true);
-          renderer.drawIcon(CoverIcon, tileX + hPaddingInSelection + 24, tileY + hPaddingInSelection + 24, 32);
+          constexpr int sourceIconSize = 32;
+          const auto& metrics = UITheme::getInstance().getMetrics();
+          const int iconSize = KoboIconMetrics::coverPlaceholderSize(
+              sourceIconSize, tileWidth - 2 * hPaddingInSelection, metrics.homeCoverHeight);
+          KoboIconMetrics::drawScaledSquare(renderer, CoverIcon,
+                                            tileX + (tileWidth - iconSize) / 2,
+                                            tileY + hPaddingInSelection + (metrics.homeCoverHeight / 3 - iconSize) / 2,
+                                            sourceIconSize, iconSize);
         }
       }
 

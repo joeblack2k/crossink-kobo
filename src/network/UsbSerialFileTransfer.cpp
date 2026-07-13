@@ -1,5 +1,16 @@
 #include "UsbSerialFileTransfer.h"
 
+#ifdef KOBO_LINUX
+
+// N437 exposes USB networking and the native web transfer service instead of
+// the ESP USB-CDC command channel.  Keep the legacy protocol inert so a stale
+// CMake source list cannot pull ESP watchdog/serial behaviour into Kobo.
+namespace UsbSerialFileTransfer {
+ProcessResult process(bool) { return ProcessResult::None; }
+}  // namespace UsbSerialFileTransfer
+
+#else
+
 #include <Arduino.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
@@ -658,3 +669,5 @@ ProcessResult process(bool allowed) {
 }
 
 }  // namespace UsbSerialFileTransfer
+
+#endif  // KOBO_LINUX

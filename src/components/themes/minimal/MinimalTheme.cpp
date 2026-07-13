@@ -1,5 +1,9 @@
 #include "MinimalTheme.h"
 
+#ifdef KOBO_LINUX
+#include "components/TouchUiRegistry.h"
+#endif
+
 #include <Arduino.h>
 #include <Bitmap.h>
 #include <Epub.h>
@@ -21,6 +25,7 @@
 #include "activities/reader/BookReadingStats.h"
 #include "activities/reader/GlobalReadingStats.h"
 #include "activities/reader/ReadingStatsUtils.h"
+#include "components/KoboIconMetrics.h"
 #include "components/UITheme.h"
 #include "components/icons/afternoon.h"
 #include "components/icons/book24.h"
@@ -30,6 +35,7 @@
 #include "components/icons/night.h"
 #include "components/icons/streak.h"
 #include "fontIds.h"
+#include "platform/DeviceCapabilities.h"
 
 namespace {
 struct MinimalQuote {
@@ -148,22 +154,23 @@ void drawCenteredStatsRow(const GfxRenderer& renderer, const uint8_t* icon, cons
   }
 
   const int labelLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int rowHeight = std::max(labelLineHeight, iconSize);
+  const int scaledIconSize = KoboIconMetrics::scaledAssetSize(iconSize, std::max(iconSize, regionHeight));
+  const int rowHeight = std::max(labelLineHeight, scaledIconSize);
   const int topY = regionTop + std::max(0, regionHeight - rowHeight) / 2;
   const int availableWidth = std::max(1, screenWidth - kStatsFooterSideInset * 2);
   const int iconTextGap = 10;
-  const std::string text = renderer.truncatedText(UI_10_FONT_ID, label, availableWidth - iconSize - iconTextGap);
+  const std::string text = renderer.truncatedText(UI_10_FONT_ID, label, availableWidth - scaledIconSize - iconTextGap);
   const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, text.c_str());
-  const int blockWidth = iconSize + iconTextGap + textWidth;
+  const int blockWidth = scaledIconSize + iconTextGap + textWidth;
   const int iconX = (screenWidth - blockWidth) / 2;
-  const int iconY = topY + (rowHeight - iconSize) / 2;
-  const int textX = iconX + iconSize + iconTextGap;
+  const int iconY = topY + (rowHeight - scaledIconSize) / 2;
+  const int textX = iconX + scaledIconSize + iconTextGap;
   const int textY = topY + (rowHeight - labelLineHeight) / 2;
 
   if (inverted) {
-    renderer.drawIcon(icon, iconX, iconY, iconSize, iconSize);
+    KoboIconMetrics::drawScaledSquare(renderer, icon, iconX, iconY, iconSize, scaledIconSize, true);
   } else {
-    renderer.drawIconInverted(icon, iconX, iconY, iconSize, iconSize);
+    KoboIconMetrics::drawScaledSquare(renderer, icon, iconX, iconY, iconSize, scaledIconSize, false);
   }
   renderer.drawText(UI_10_FONT_ID, textX, textY, text.c_str(), inverted);
 }
@@ -181,7 +188,7 @@ int progressLabelBottomY(const GfxRenderer& renderer, const Rect& coverRect, con
 
 void drawStatsOverlay(const GfxRenderer& renderer, const GlobalReadingStats& globalStats, const Rect& coverRect,
                       const float progressPercent, const bool inverted) {
-  if (!gpio.deviceIsX3()) {
+  if (!crossink::platform::deviceCapabilities(gpio).hasRtc) {
     return;
   }
 
@@ -317,9 +324,12 @@ void drawMissingBookCover(const GfxRenderer& renderer, const Rect& coverRect, co
   const int dividerY = placeholderRect.y + placeholderRect.height / 3;
   renderer.drawLine(placeholderRect.x, dividerY, placeholderRect.x + placeholderRect.width - 1, dividerY, true);
 
-  constexpr int iconSize = 32;
-  renderer.drawIcon(CoverIcon, placeholderRect.x + (placeholderRect.width - iconSize) / 2,
-                    placeholderRect.y + (placeholderRect.height / 3 - iconSize) / 2, iconSize, iconSize);
+  constexpr int sourceIconSize = 32;
+  const int iconSize =
+      KoboIconMetrics::coverPlaceholderSize(sourceIconSize, placeholderRect.width, placeholderRect.height);
+  KoboIconMetrics::drawScaledSquare(renderer, CoverIcon, placeholderRect.x + (placeholderRect.width - iconSize) / 2,
+                                    placeholderRect.y + (placeholderRect.height / 3 - iconSize) / 2, sourceIconSize,
+                                    iconSize);
 
   constexpr int textPadding = 16;
   constexpr int textVerticalPadding = 22;
@@ -397,19 +407,25 @@ void MinimalTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char
   (void)subtitle;
 
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
+  const auto& metrics = UITheme::getInstance().getMetrics();
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  const int batteryX = rect.x + rect.width - 12 - MinimalMetrics::values.batteryWidth;
+  const int batteryX = rect.x + rect.width - metrics.statusBarHorizontalMargin - metrics.batteryWidth;
   const int batteryY = rect.y + homeHeaderTopInset;
-  drawBatteryRight(renderer,
-                   Rect{batteryX, batteryY, MinimalMetrics::values.batteryWidth, MinimalMetrics::values.batteryHeight},
+  const int batteryTextWidth =
+      showBatteryPercentage ? renderer.getTextWidth(SMALL_FONT_ID, "100%") + batteryPercentSpacing : 0;
+  const int wifiWidth = wifiIndicatorWidth(metrics);
+  drawWifiIndicator(renderer,
+                    Rect{batteryX - batteryTextWidth - wifiWidth - 4, batteryY, wifiWidth, metrics.batteryHeight});
+  drawBatteryRight(renderer, Rect{batteryX, batteryY, metrics.batteryWidth, metrics.batteryHeight},
                    showBatteryPercentage);
 
   if (title) {
     constexpr int titleInsetX = 12;
-    const int maxTitleWidth = batteryX - rect.x - titleInsetX - MinimalMetrics::values.contentSidePadding;
+    const int maxTitleWidth =
+        batteryX - batteryTextWidth - wifiWidth - 4 - rect.x - titleInsetX - metrics.contentSidePadding;
     auto truncatedTitle = renderer.truncatedText(UI_12_FONT_ID, title, maxTitleWidth, EpdFontFamily::BOLD);
-    renderer.drawText(UI_12_FONT_ID, rect.x + titleInsetX, rect.y + MinimalMetrics::values.batteryBarHeight + 3,
+    renderer.drawText(UI_12_FONT_ID, rect.x + titleInsetX, rect.y + metrics.batteryBarHeight + 3,
                       truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
     renderer.drawLine(rect.x, rect.y + rect.height - 3, rect.x + rect.width - 1, rect.y + rect.height - 3, 3, true);
   }
@@ -435,6 +451,9 @@ void MinimalTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std:
     const int slotX = rect.x + (i * rect.width) / tabCount;
     const int nextSlotX = rect.x + ((i + 1) * rect.width) / tabCount;
     const int slotWidth = nextSlotX - slotX;
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerDirect(slotX, rect.y, slotWidth, rect.height, TouchUiRegistry::TargetKind::Tab, i);
+#endif
     const auto& tab = tabs[i];
     const auto fontStyle = tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
     const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, tab.label, fontStyle);
@@ -445,8 +464,9 @@ void MinimalTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std:
 }
 
 int MinimalTheme::compactFileBrowserRowHeightFor(const GfxRenderer& renderer) {
+  const int iconSize = KoboIconMetrics::listSize(UITheme::getInstance().getMetrics(), kFileBrowserIconSize);
   const int textHeight = renderer.getLineHeight(UI_10_FONT_ID) * 2 + kFileBrowserRowVerticalPadding;
-  return std::max(kFileBrowserIconSize + kFileBrowserRowVerticalPadding, textHeight);
+  return std::max(iconSize + kFileBrowserRowVerticalPadding, textHeight);
 }
 
 int MinimalTheme::compactFileBrowserRowHeight(const GfxRenderer& renderer) const {
@@ -480,6 +500,7 @@ void MinimalTheme::drawCompactFileBrowserList(const GfxRenderer& renderer, Rect 
   if (itemCount <= 0) return;
 
   const int fileRowHeight = compactFileBrowserRowHeightFor(renderer);
+  const int fileIconSize = KoboIconMetrics::listSize(UITheme::getInstance().getMetrics(), kFileBrowserIconSize);
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const int folderRowHeight = MinimalMetrics::values.listRowHeight;
   const auto isFolderRow = [&](int index) { return rowSubtitle(index) == "folder"; };
@@ -539,11 +560,14 @@ void MinimalTheme::drawCompactFileBrowserList(const GfxRenderer& renderer, Rect 
   }
 
   const int iconX = rect.x + MinimalMetrics::values.contentSidePadding + kFileBrowserTextGap;
-  const int textX = iconX + kFileBrowserIconSize + kFileBrowserTextGap;
+  const int textX = iconX + fileIconSize + kFileBrowserTextGap;
 
   int itemY = rect.y;
   for (int i = pageStartIndex; i < itemCount && i < pageEndIndex; i++) {
     const int rowHeight = rowHeightFor(i);
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerItem(rect.x, itemY, contentWidth, rowHeight, selectedIndex, i, itemCount);
+#endif
     const bool folderRow = isFolderRow(i);
     const bool selectedRow = i == selectedIndex;
 
@@ -558,8 +582,8 @@ void MinimalTheme::drawCompactFileBrowserList(const GfxRenderer& renderer, Rect 
 
     const uint8_t* iconBitmap = iconForName(rowIcon(i), kFileBrowserIconSize);
     if (iconBitmap != nullptr) {
-      const int iconY = centeredRowY(itemY, rowHeight, kFileBrowserIconSize);
-      renderer.drawIcon(iconBitmap, iconX, iconY, kFileBrowserIconSize, kFileBrowserIconSize);
+      const int iconY = centeredRowY(itemY, rowHeight, fileIconSize);
+      KoboIconMetrics::drawScaledSquare(renderer, iconBitmap, iconX, iconY, kFileBrowserIconSize, fileIconSize);
     }
 
     const int maxTitleLines = folderRow ? 1 : 2;
@@ -729,6 +753,9 @@ void MinimalTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCo
 
   for (int i = 0; i < buttonCount; ++i) {
     const int rowY = panelY + 1 + i * kMenuRowHeight;
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerItem(panelX, rowY, panelW, kMenuRowHeight, selectedIndex, i, buttonCount);
+#endif
     if (i == selectedIndex) {
       const int triangleX = panelX + kMenuSelectionTriangleInset;
       const int triangleCenterY = rowY + kMenuRowHeight / 2;

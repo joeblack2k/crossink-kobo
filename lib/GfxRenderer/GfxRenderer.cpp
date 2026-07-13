@@ -6,7 +6,9 @@
 #include <Logging.h>
 #include <SdCardFont.h>
 #include <Utf8.h>
+#if !defined(KOBO_LINUX)
 #include <freertos/task.h>
+#endif
 
 #include <algorithm>
 
@@ -66,6 +68,10 @@ const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const Ep
 }
 
 GfxRenderer::BitmapScratchLock::BitmapScratchLock(const GfxRenderer& renderer) : renderer_(renderer) {
+#if defined(KOBO_LINUX)
+  renderer_.bitmapScratchMutex_.lock();
+  locked_ = true;
+#else
   if (renderer_.bitmapScratchMutex_ == nullptr) {
     LOG_ERR("GFX", "!! Bitmap scratch mutex is not initialized");
     assert(false);
@@ -80,11 +86,16 @@ GfxRenderer::BitmapScratchLock::BitmapScratchLock(const GfxRenderer& renderer) :
   }
 
   locked_ = true;
+#endif
 }
 
 GfxRenderer::BitmapScratchLock::~BitmapScratchLock() {
   if (!locked_) return;
+#if defined(KOBO_LINUX)
+  renderer_.bitmapScratchMutex_.unlock();
+#else
   xSemaphoreGive(renderer_.bitmapScratchMutex_);
+#endif
 }
 
 void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask) const {
@@ -155,8 +166,12 @@ void GfxRenderer::freeBitmapScratchBuffers() {
 }
 
 bool GfxRenderer::bitmapScratchLockHeldByCurrentTask() const {
+#if defined(KOBO_LINUX)
+  return bitmapScratchMutex_.isHeldByCurrentThread();
+#else
   if (bitmapScratchMutex_ == nullptr) return false;
   return xSemaphoreGetMutexHolder(bitmapScratchMutex_) == xTaskGetCurrentTaskHandle();
+#endif
 }
 
 bool GfxRenderer::ensureBitmapScratchBuffers(const size_t outputRowSize, const size_t rowBytesSize) const {

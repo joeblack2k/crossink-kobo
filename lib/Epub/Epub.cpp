@@ -109,20 +109,29 @@ bool cachedBmpMatchesDimensions(const std::string& path, const int width, const 
     return false;
   }
 
-  uint8_t header[26] = {};
-  const bool hasHeader = file.size() >= sizeof(header) && file.read(header, sizeof(header)) == sizeof(header);
+  uint8_t header[54] = {};
+  const uint64_t fileSize = file.size();
+  const bool hasHeader = fileSize >= sizeof(header) && file.read(header, sizeof(header)) == sizeof(header);
   file.close();
   const bool isBmp = hasHeader && header[0] == 'B' && header[1] == 'M';
+  const uint32_t pixelOffset = isBmp ? readLe32(header + 10) : 0;
   const int32_t bmpWidth = isBmp ? readLe32(header + 18) : 0;
   const int32_t bmpHeight = isBmp ? readLe32(header + 22) : 0;
   const int32_t absHeight = bmpHeight < 0 ? -bmpHeight : bmpHeight;
+  const uint16_t bpp = isBmp ? static_cast<uint16_t>(header[28] | (static_cast<uint16_t>(header[29]) << 8)) : 0;
+  const uint64_t rowBytes = bmpWidth > 0 && bpp > 0
+                                ? static_cast<uint64_t>((static_cast<uint64_t>(bmpWidth) * bpp + 31) / 32) * 4
+                                : 0;
+  const bool hasCompletePixelData = rowBytes > 0 && absHeight > 0 &&
+                                    fileSize >= static_cast<uint64_t>(pixelOffset) + rowBytes * absHeight;
   const bool exactMatch = isBmp && bmpWidth == width && absHeight == height;
   const bool containedMatch = allowContainedDimensions && isBmp && bmpWidth > 0 && absHeight > 0 && bmpWidth <= width &&
                               absHeight <= height && (bmpWidth == width || absHeight == height);
-  const bool matches = exactMatch || containedMatch;
+  const bool matches = (exactMatch || containedMatch) && hasCompletePixelData;
   if (!matches) {
-    LOG_DBG("EBP", "Removing stale thumbnail dimensions: %s (%dx%d expected %dx%d)", path.c_str(), bmpWidth, absHeight,
-            width, height);
+    LOG_DBG("EBP", "Removing stale/incomplete thumbnail: %s (%dx%d expected %dx%d, %llu/%llu bytes)", path.c_str(),
+            bmpWidth, absHeight, width, height, static_cast<unsigned long long>(fileSize),
+            static_cast<unsigned long long>(static_cast<uint64_t>(pixelOffset) + rowBytes * absHeight));
     Storage.remove(path.c_str());
   }
   return matches;
@@ -320,6 +329,9 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const 
   bookMetadata.title = utf8ComposeNfc(opfParser.title);
   bookMetadata.author = opfParser.author;
   bookMetadata.language = opfParser.language;
+  bookMetadata.series = opfParser.series;
+  bookMetadata.seriesIndex = opfParser.seriesIndex;
+  bookMetadata.collection = opfParser.collection;
   bookMetadata.coverItemHref = opfParser.coverItemHref;
 
   // Guide-based cover fallback: if no cover found via metadata/properties,
@@ -855,6 +867,30 @@ const std::string& Epub::getLanguage() const {
   }
 
   return bookMetadataCache->coreMetadata.language;
+}
+
+const std::string& Epub::getSeries() const {
+  static std::string blank;
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return blank;
+  }
+  return bookMetadataCache->coreMetadata.series;
+}
+
+const std::string& Epub::getSeriesIndex() const {
+  static std::string blank;
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return blank;
+  }
+  return bookMetadataCache->coreMetadata.seriesIndex;
+}
+
+const std::string& Epub::getCollection() const {
+  static std::string blank;
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return blank;
+  }
+  return bookMetadataCache->coreMetadata.collection;
 }
 
 std::string Epub::getCoverBmpPath(bool cropped) const {

@@ -2,9 +2,6 @@
 #include <Epub.h>
 #include <Epub/FootnoteEntry.h>
 #include <Epub/Section.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-
 #include <memory>
 #include <optional>
 #include <string>
@@ -59,6 +56,13 @@ class EpubReaderActivity final : public Activity {
   std::string pendingFootnotePreviewAnchor;
   bool activeFootnotePreview = false;
   int pagesUntilFullRefresh = 0;
+  // An image page drives the Pearl panel through a partial waveform.  The
+  // immediately following text page must use the stronger full waveform so
+  // its white background actually clears image pigment.
+  bool fullRefreshAfterImagePage = false;
+  // The next spine cache is warmed once after a quiet reader interval.  It is
+  // deliberately persisted to storage, not retained in RAM.
+  int nextSpinePreloadAttempted = -1;
   int cachedSpineIndex = 0;
   int cachedChapterPageNumber = 0;
   int cachedChapterTotalPageCount = 0;
@@ -202,6 +206,7 @@ class EpubReaderActivity final : public Activity {
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void reindexCurrentSection();
+  void maybePreindexNextSpine();
   void executeReaderQuickAction(CrossPointSettings::LONG_PRESS_MENU_ACTION action);
   bool quickActionUsesConfirmRelease(CrossPointSettings::LONG_PRESS_MENU_ACTION action) const;
   bool quickActionUsesPowerRelease(CrossPointSettings::LONG_PRESS_MENU_ACTION action) const;

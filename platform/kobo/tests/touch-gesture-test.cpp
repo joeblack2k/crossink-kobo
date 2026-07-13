@@ -27,7 +27,7 @@ void expect(const TouchDispatch dispatch, const TouchAction action, const bool p
 }
 
 TouchFrame frame(const int x, const int y, const bool down, const std::uint64_t timestamp) {
-  return {{x, y}, down, true, timestamp};
+  return {{x, y}, down, true, timestamp, {x, y}};
 }
 
 }  // namespace
@@ -41,12 +41,12 @@ int main() {
 
   expect(gesture.update(frame(500, 300, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
          false, false, "navigation upper down must wait");
-  expect(gesture.update(frame(500, 300, false, 100'000), TouchContext::Navigation, width, height), TouchAction::Up,
-         true, true, "navigation upper half");
+  expect(gesture.update(frame(500, 300, false, 100'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
+         true, true, "navigation upper item");
   expect(gesture.update(frame(500, 1000, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
          false, false, "navigation lower down must wait");
-  expect(gesture.update(frame(500, 1000, false, 100'000), TouchContext::Navigation, width, height), TouchAction::Down,
-         true, true, "navigation lower half");
+  expect(gesture.update(frame(500, 1000, false, 100'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
+         true, true, "navigation lower item");
 
   expect(gesture.update(frame(500, 900, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
          false, false, "vertical swipe down must wait");

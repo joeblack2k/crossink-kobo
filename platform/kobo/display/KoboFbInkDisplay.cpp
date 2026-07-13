@@ -102,16 +102,22 @@ bool KoboFbInkDisplay::refresh(RefreshKind kind) {
   return true;
 }
 
-bool KoboFbInkDisplay::presentPackedMono(const uint8_t* packed, size_t packedSize, RefreshKind kind) {
+bool KoboFbInkDisplay::presentPackedMono(const uint8_t* packed, size_t packedSize, RefreshKind kind,
+                                         const RefreshRegion& region) {
   if (!isOpen() || packed == nullptr || packedSize != kPackedFrameBytes) {
     lastError_ = EINVAL;
     return false;
   }
+  if (region.empty()) return true;
   if (partialSinceFull_ >= 5U) kind = RefreshKind::Full;
   if (!copyPackedToFramebuffer(packed) || !refresh(kind)) return false;
   partialSinceFull_ = kind == RefreshKind::Full ? 0U : static_cast<uint8_t>(partialSinceFull_ + 1U);
   lastError_ = 0;
   return true;
+}
+
+bool KoboFbInkDisplay::presentPackedMono(const uint8_t* const packed, const size_t packedSize, const RefreshKind kind) {
+  return presentPackedMono(packed, packedSize, kind, {.x = 0, .y = 0, .width = kPanelWidth, .height = kPanelHeight});
 }
 
 }  // namespace crossink::kobo

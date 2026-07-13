@@ -5,7 +5,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
 #include <esp_mac.h>
 #endif
 
@@ -13,15 +13,19 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "components/DirectListTouch.h"
 #include "SdCardFontSystem.h"
 #include "WifiCredentialStore.h"
+#ifdef KOBO_LINUX
+#include <KoboWifiAutoConnect.h>
+#endif
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
 
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
 uint8_t sLastStaDisconnectReason = 0;
 bool sConnectionAttemptLoggingActive = false;
 bool sWifiEventLoggingRegistered = false;
@@ -30,7 +34,7 @@ bool sWifiEventLoggingRegistered = false;
 std::string getDisplayMacAddress() {
   uint8_t mac[6] = {};
 
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
   if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
     LOG_ERR("WIFI", "Failed to read station MAC address");
   }
@@ -44,7 +48,7 @@ std::string getDisplayMacAddress() {
   return std::string(macStr);
 }
 
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
 void logWifiStationEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
   if (!sConnectionAttemptLoggingActive) {
     return;
@@ -101,13 +105,13 @@ const char* wifiStatusName(const wl_status_t status) {
       return "CONNECTED";
     case WL_CONNECT_FAILED:
       return "CONNECT_FAILED";
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
     case WL_CONNECTION_LOST:
       return "CONNECTION_LOST";
 #endif
     case WL_DISCONNECTED:
       return "DISCONNECTED";
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
     case WL_NO_SHIELD:
       return "NO_SHIELD";
     case WL_STOPPED:
@@ -124,7 +128,7 @@ bool wifiStatusIsConnectionFailure(const wl_status_t status) {
   if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
     return true;
   }
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
   return status == WL_CONNECTION_LOST;
 #else
   return false;
@@ -135,7 +139,7 @@ const char* wifiAuthName(const int authMode) {
   switch (authMode) {
     case WIFI_AUTH_OPEN:
       return "OPEN";
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
     case WIFI_AUTH_WEP:
       return "WEP";
     case WIFI_AUTH_WPA_PSK:
@@ -143,7 +147,7 @@ const char* wifiAuthName(const int authMode) {
 #endif
     case WIFI_AUTH_WPA2_PSK:
       return "WPA2_PSK";
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
     case WIFI_AUTH_WPA_WPA2_PSK:
       return "WPA_WPA2_PSK";
     case WIFI_AUTH_WPA2_ENTERPRISE:
@@ -168,6 +172,9 @@ const char* wifiAuthName(const int authMode) {
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
+#ifdef KOBO_LINUX
+  crossink::kobo::setWifiAutoConnectSuspended(true);
+#endif
   sdFontSystem.releaseLoadedFont(renderer);
   ensureWifiEventLoggingRegistered();
 
@@ -194,11 +201,33 @@ void WifiSelectionActivity::onEnter() {
   lastConnectionStatusLogTime = 0;
   lastLoggedWifiStatus = -1;
 
+#ifdef KOBO_LINUX
+  stationWasConnectedAtEntry = WiFi.status() == WL_CONNECTED;
+#endif
+
   // Cache MAC address for display
   cachedMacAddress = getDisplayMacAddress();
 
   // Trigger first update to show scanning message
   requestUpdate();
+
+#ifdef KOBO_LINUX
+  // Network-dependent Kobo activities commonly open this picker merely to
+  // ensure that Wi-Fi is available.  Re-running `begin()` for the same live
+  // station kills wpa_supplicant and briefly takes the always-on upload
+  // service offline.  Keep that existing session and return it to the caller
+  // as an already-completed selection.  The explicit Settings route passes
+  // autoConnect=false and still opens a connected scan/list for changing AP.
+  if (allowAutoConnect && stationWasConnectedAtEntry) {
+    selectedSSID = WiFi.SSID().c_str();
+    connectedIP = WiFi.localIP().toString().c_str();
+    state = WifiSelectionState::CONNECTED;
+    LOG_INF("WIFI", "Kobo picker retained existing station: ssid=%s ip=%s", selectedSSID.c_str(),
+            connectedIP.c_str());
+    requestUpdate();
+    return;
+  }
+#endif
 
   // Attempt to auto-connect to the last network
   if (allowAutoConnect) {
@@ -235,9 +264,12 @@ void WifiSelectionActivity::onExit() {
 
   // Successful connections leave WiFi up for the parent activity. Canceled
   // flows own their cleanup because no parent may be present to tear WiFi down.
+  // On Kobo a saved network remains available after a cancelled picker too;
+  // the platform service owns reconnecting and suspend teardown.
+#if !defined(KOBO_LINUX)
   if (tearDownWifiOnExit) {
     LOG_DBG("WIFI", "Tearing down WiFi after cancelled selection...");
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
     sConnectionAttemptLoggingActive = false;
 #endif
     WiFi.disconnect(false);
@@ -245,8 +277,12 @@ void WifiSelectionActivity::onExit() {
     WiFi.mode(WIFI_OFF);
     LOG_DBG("WIFI", "Free heap after WiFi off: %d bytes", ESP.getFreeHeap());
   }
+#endif
 
   LOG_DBG("WIFI", "Free heap at onExit end: %d bytes", ESP.getFreeHeap());
+#ifdef KOBO_LINUX
+  crossink::kobo::setWifiAutoConnectSuspended(false);
+#endif
 }
 
 void WifiSelectionActivity::startWifiScan() {
@@ -259,7 +295,15 @@ void WifiSelectionActivity::startWifiScan() {
   LOG_INF("WIFI", "Starting WiFi scan (mode=%d status=%d/%s heap=%u maxAlloc=%u)", static_cast<int>(WiFi.getMode()),
           static_cast<int>(WiFi.status()), wifiStatusName(WiFi.status()), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   WiFi.mode(WIFI_STA);
+#ifdef KOBO_LINUX
+  // `iw scan` works while associated.  Preserve a connection the foreground
+  // picker did not create; only a later explicit join may replace it.
+  if (!stationWasConnectedAtEntry || WiFi.status() != WL_CONNECTED) {
+    WiFi.disconnect();
+  }
+#else
   WiFi.disconnect();
+#endif
   delay(100);
 
   // Start async scan
@@ -394,7 +438,7 @@ void WifiSelectionActivity::attemptConnection() {
   connectionError.clear();
   lastConnectionStatusLogTime = 0;
   lastLoggedWifiStatus = -1;
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
   sLastStaDisconnectReason = 0;
   sConnectionAttemptLoggingActive = false;
 #endif
@@ -409,9 +453,9 @@ void WifiSelectionActivity::attemptConnection() {
   // Abort any in-progress SDK auto-connect before our explicit begin().
   // Do not erase the AP config or power-cycle the radio; some routers fail the
   // next WPA handshake after that heavier reset.
-#ifdef SIMULATOR
-  // The pinned POSIX simulator mirrors the older Arduino void overload. Its
-  // disconnect is synchronous, so there is no timeout result to inspect.
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  // The pinned POSIX simulator and Kobo's Linux adapter both expose the
+  // synchronous Arduino overload.
   WiFi.disconnect(false, false);
 #else
   if (!WiFi.disconnect(false, false, 1000)) {
@@ -419,7 +463,7 @@ void WifiSelectionActivity::attemptConnection() {
   }
 #endif
   delay(100);
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
   sLastStaDisconnectReason = 0;
   sConnectionAttemptLoggingActive = true;
 #endif
@@ -462,7 +506,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
     snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
     connectedIP = ipStr;
     autoConnecting = false;
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
     sConnectionAttemptLoggingActive = false;
 #endif
     LOG_INF("WIFI", "Connected to ssid=%s ip=%s rssi=%d", selectedSSID.c_str(), connectedIP.c_str(), WiFi.RSSI());
@@ -514,7 +558,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
     }
     LOG_INF("WIFI", "Connection failed: ssid=%s status=%d/%s elapsed=%lums", selectedSSID.c_str(),
             static_cast<int>(status), wifiStatusName(status), now - connectionStartTime);
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
     if (sLastStaDisconnectReason != 0) {
       LOG_INF("WIFI", "Last disconnect reason: %u(%s)", sLastStaDisconnectReason,
               WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(sLastStaDisconnectReason)));
@@ -532,7 +576,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
     connectionError = tr(STR_ERROR_CONNECTION_TIMEOUT);
     LOG_INF("WIFI", "Connection timed out: ssid=%s elapsed=%lums lastStatus=%d/%s", selectedSSID.c_str(),
             millis() - connectionStartTime, static_cast<int>(status), wifiStatusName(status));
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
     if (sLastStaDisconnectReason != 0) {
       LOG_INF("WIFI", "Last disconnect reason before timeout: %u(%s)", sLastStaDisconnectReason,
               WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(sLastStaDisconnectReason)));
@@ -549,10 +593,19 @@ void WifiSelectionActivity::loop() {
   if ((state == WifiSelectionState::SCANNING || state == WifiSelectionState::CONNECTING ||
        state == WifiSelectionState::AUTO_CONNECTING) &&
       mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-#ifndef SIMULATOR
+#if !defined(SIMULATOR) && !defined(KOBO_LINUX)
     sConnectionAttemptLoggingActive = false;
 #endif
+#ifdef KOBO_LINUX
+    // A passive scan never owns an already connected station.  Keep it alive
+    // when the user backs out; a connection attempt begun by this picker is
+    // still cancelled so background auto-connect can resume the saved AP.
+    if (state != WifiSelectionState::SCANNING || !stationWasConnectedAtEntry) {
+      WiFi.disconnect();
+    }
+#else
     WiFi.disconnect();
+#endif
     mappedInput.suppressNextBackRelease();
     onComplete(false);
     return;
@@ -681,6 +734,8 @@ void WifiSelectionActivity::loop() {
       onComplete(false);
       return;
     }
+
+    consumeDirectListSelection(mappedInput, static_cast<int>(networks.size()), selectedNetworkIndex);
 
     // Check for Confirm button to select network or rescan
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {

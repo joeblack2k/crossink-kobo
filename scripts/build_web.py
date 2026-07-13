@@ -30,6 +30,10 @@ PAGES = {
     "files":    ("FilesPageHtml",    "Files - CrossInk",           "files",    '  <script src="/js/jszip.min.js"></script>'),
     "settings": ("SettingsPageHtml", "Settings - CrossInk Reader", "settings", ""),
     "fonts":    ("FontsPageHtml",    "Fonts - CrossInk",           "fonts",    ""),
+    # The Kobo uses the native POSIX HTTP server.  It serves this single-page
+    # portal directly so the device and preview always share web/ as source of
+    # truth instead of carrying a second hand-written HTML implementation.
+    "portal":   ("KoboPortalHtml",    "CrossInk for Kobo",          "",         ""),
 }
 
 PRESERVE_TAGS = "pre|code|textarea|script|style"

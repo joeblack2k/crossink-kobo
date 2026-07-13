@@ -40,6 +40,9 @@ class HalDisplay {
 
   void displayBuffer(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
   void refreshDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
+  // Kobo uses this to request a one-shot physical panel clean-up on the next
+  // present. ESP targets do not need a separate waveform override.
+  void requestCleanRefresh();
 
   // Power management
   void deepSleep();

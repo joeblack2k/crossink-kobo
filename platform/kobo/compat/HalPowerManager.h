@@ -12,7 +12,7 @@ class HalPowerManager {
 
   void begin();
   void setPowerSaving(bool enabled);
-  void startDeepSleep(HalGPIO& gpio) const;
+  [[nodiscard]] crossink::kobo::KoboSuspendResult startDeepSleep(HalGPIO& gpio) const;
   [[nodiscard]] std::uint16_t getBatteryPercentage() const;
 
   class Lock {

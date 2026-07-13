@@ -606,6 +606,19 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   // The 1/8-scale output is then passed through the custom scaler to reach the target dimensions.
   const bool progressive = isProgressiveJpeg(jpegFile);
 
+#ifdef KOBO_LINUX
+  // The N437's ARM JPEGDEC build still faults inside JPEGDecodeMCU_P for some
+  // valid progressive covers (observed while pressing the library's Next
+  // button).  Refuse this unsafe decoder path rather than letting a cover
+  // thumbnail reboot the reader. Baseline JPEG and all existing cached covers
+  // continue normally; progressive support remains an explicit follow-up with
+  // a decoder that is safe on ARM.
+  if (progressive) {
+    LOG_ERR("JPG", "Skipping progressive JPEG on Kobo: unsafe JPEGDEC MCU path");
+    return false;
+  }
+#endif
+
   s_jpegFile = &jpegFile;
 
   const auto jpeg = makeUniqueNoThrow<JPEGDEC>();

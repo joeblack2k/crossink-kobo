@@ -5,6 +5,8 @@
 - Added a dedicated Linux hardware layer and reproducible minimal Buildroot image for the Kobo Glo HD N437, using the modern Kobo DRM kernel, USB Ethernet, key-only SSH, e-ink refresh control, touch, frontlight, battery monitoring, suspend and an independent recovery mode.
 - Added a native 1072×1448 Kobo interface with direct reader touch zones and a permanent two-button touch frame that changes actions with the current screen.
 - Added Kobo image construction, verification, hardware probing, deployment, rollback and release-evidence tooling while preserving the original CrossInk simulator and Xteink targets.
+- Added a five-point N437 touch-calibration utility that records raw and mapped coordinates for hardware verification.
+- Added a real Linux Wi-Fi adapter for station scanning/connection and hotspot mode, with credentials kept in root-only runtime files.
 
 ### Changed
 
@@ -13,6 +15,14 @@
 ### Fixed
 
 - Kobo image assembly now preserves Buildroot root ownership under unprivileged builders, so Dropbear accepts the dedicated SSH key and system files retain their intended permissions.
+- Kobo navigation no longer treats arbitrary upper/lower screen taps as Up/Down or routes Home through X4-only front-button handling; rendered menu rows, list rows, option dialogs and keyboard keys now expose direct touch targets.
+- Incremental Kobo development builds can force rebuilding the local CrossInk package, preventing an older ARM executable from being silently redeployed after source changes.
+- N437 portrait touch no longer mirrors the horizontal axis; calibration now matches the zForce panel's native landscape origin.
+- Kobo touch hitboxes are synchronized between the render and input threads, preventing taps from resolving against a partially rebuilt region list.
+- Kobo's native file-transfer and WebSocket servers listen on the advertised network ports and interfaces instead of simulator-only loopback addresses.
+- Kobo touch routing now audits forbidden overlapping hit regions. Library modal
+  panels clear the underlying grid targets, header actions stop at the tab
+  boundary and the Home footer no longer overlaps the final menu row.
 
 ## [v1.4.0] - 2026-07-10
 

@@ -100,7 +100,7 @@ void OpdsParser::clear() {
   prevPageUrl.clear();
   currentEntry = OpdsEntry{};
   currentText.clear();
-  inEntry = inTitle = inAuthor = inAuthorName = inId = false;
+  inEntry = inTitle = inAuthor = inAuthorName = inId = inUpdated = false;
   errorOccured = !entries || entryCapacity == 0;
   errorReason = errorOccured ? OpdsParserError::NO_ENTRY_BUFFER : OpdsParserError::NONE;
   resetXmlParser();
@@ -168,6 +168,16 @@ void XMLCALL OpdsParser::startElement(void* userData, const XML_Char* name, cons
           if (self->currentEntry.type != OpdsEntryType::BOOK || (isPlainEpub && !alreadyHasPlainEpub)) {
             self->currentEntry.type = OpdsEntryType::BOOK;
             self->currentEntry.href = href;
+            self->currentEntry.acquisitionType = type;
+          }
+        } else if (rel && type && (strstr(rel, "image") != nullptr || strstr(rel, "cover") != nullptr) &&
+                   strstr(type, "image/") != nullptr) {
+          // OPDS 1.x uses image/image-thumbnail links; keep the full cover
+          // when both are present, otherwise retain the first usable image.
+          const bool fullCover = strstr(rel, "thumbnail") == nullptr;
+          if (self->currentEntry.coverHref.empty() || fullCover) {
+            self->currentEntry.coverHref = href;
+            self->currentEntry.coverRel = rel;
           }
         } else if (type && strstr(type, "application/atom+xml") != nullptr) {
           if (self->currentEntry.type != OpdsEntryType::BOOK) {
@@ -198,6 +208,17 @@ void XMLCALL OpdsParser::startElement(void* userData, const XML_Char* name, cons
   } else if (strcmp(name, "id") == 0 || strstr(name, ":id") != nullptr) {
     self->inId = true;
     self->currentText.clear();
+  } else if (strcmp(name, "updated") == 0 || strstr(name, ":updated") != nullptr) {
+    self->inUpdated = true;
+    self->currentText.clear();
+  } else if (strstr(name, "sequence") != nullptr) {
+    // OPDS 1.x series metadata is conventionally represented by
+    // <series:sequence name="Series" number="2"/>. Namespace-aware Expat
+    // names vary between servers, so deliberately match the local suffix.
+    const char* series = findAttribute(atts, "name");
+    const char* index = findAttribute(atts, "number");
+    if (series) self->currentEntry.series = series;
+    if (index) self->currentEntry.seriesIndex = index;
   }
 }
 
@@ -225,13 +246,16 @@ void XMLCALL OpdsParser::endElement(void* userData, const XML_Char* name) {
     } else if (strcmp(name, "id") == 0 || strstr(name, ":id") != nullptr) {
       if (self->inId) self->currentEntry.id = std::move(self->currentText);
       self->inId = false;
+    } else if (strcmp(name, "updated") == 0 || strstr(name, ":updated") != nullptr) {
+      if (self->inUpdated) self->currentEntry.updated = std::move(self->currentText);
+      self->inUpdated = false;
     }
   }
 }
 
 void XMLCALL OpdsParser::characterData(void* userData, const XML_Char* s, const int len) {
   auto* self = static_cast<OpdsParser*>(userData);
-  if (self->inTitle || self->inAuthorName || self->inId) {
+  if (self->inTitle || self->inAuthorName || self->inId || self->inUpdated) {
     self->currentText.append(s, len);
   }
 }

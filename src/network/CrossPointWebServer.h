@@ -34,6 +34,10 @@ class CrossPointWebServer {
     HalFile file;
     String fileName;
     String path = "/";
+    // Keep the destination intact until the complete multipart stream has
+    // been synced and atomically renamed into place.
+    String targetPath;
+    String temporaryPath;
     size_t size = 0;
     bool success = false;
     String error = "";
@@ -136,6 +140,7 @@ class CrossPointWebServer {
   void handleGetOpdsServers() const;
   void handlePostOpdsServer();
   void handleDeleteOpdsServer();
+  void handleMakePrimaryOpdsServer();
 
   // Wi-Fi credential handlers
   void handleGetWifiNetworks() const;

@@ -74,6 +74,11 @@ class WifiSelectionActivity final : public Activity {
   // Whether we are attempting to auto-connect
   bool autoConnecting = false;
   bool tearDownWifiOnExit = false;
+#ifdef KOBO_LINUX
+  // The Kobo background station service owns a connection that was already
+  // live when this picker opened.  Scanning must not tear that session down.
+  bool stationWasConnectedAtEntry = false;
+#endif
 
   // Save/forget prompt selection (0 = Yes, 1 = No)
   int savePromptSelection = 0;

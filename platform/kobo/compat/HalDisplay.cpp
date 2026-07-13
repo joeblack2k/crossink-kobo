@@ -26,6 +26,27 @@ SourceTransform HalDisplay::configuredTransform() {
 
 HalDisplay::HalDisplay() : fbInkDisplay_(configuredTransform()) { frameBuffer_.fill(0xFFU); }
 
+bool HalDisplay::setRefreshProfile(const crossink::kobo::RefreshProfile profile, const bool soakPassed) {
+  if (profile == crossink::kobo::RefreshProfile::Fast && !soakPassed) {
+    refreshProfileQualified_ = false;
+    // A qualification marker can disappear between settings loads (or after a
+    // kernel update).  Force the executor back to the conservative policy;
+    // merely returning false would otherwise leave a previous Fast selection
+    // running until the next restart.
+    if (refreshExecutor_.profile() != crossink::kobo::RefreshProfile::Safe) {
+      (void)refreshExecutor_.selectProfile(crossink::kobo::RefreshProfile::Safe, true);
+    }
+    return false;
+  }
+  if (refreshExecutor_.profile() == profile) {
+    refreshProfileQualified_ = profile != crossink::kobo::RefreshProfile::Fast || soakPassed;
+    return true;
+  }
+  if (!refreshExecutor_.selectProfile(profile, soakPassed)) return false;
+  refreshProfileQualified_ = profile != crossink::kobo::RefreshProfile::Fast || soakPassed;
+  return true;
+}
+
 RefreshKind HalDisplay::refreshKind(const RefreshMode mode) {
   switch (mode) {
     case FULL_REFRESH:
@@ -40,6 +61,8 @@ RefreshKind HalDisplay::refreshKind(const RefreshMode mode) {
 
 void HalDisplay::begin(bool /*seamless*/) {
   if (drmDisplay_.isOpen() || fbInkDisplay_.isOpen()) return;
+  refreshExecutor_.reset();
+  refreshProfileQualified_ = false;
   if (drmDisplay_.open()) {
     useDrm_ = true;
     std::fprintf(stderr, "[KOBO] modern DRM EPDC backend active\n");
@@ -88,22 +111,23 @@ void HalDisplay::drawImageTransparent(const std::uint8_t* imageData, const std::
 
 void HalDisplay::displayBuffer(const RefreshMode mode, bool /*turnOffScreen*/) { refreshDisplay(mode); }
 
+void HalDisplay::requestCleanRefresh() { refreshExecutor_.requestCleanRefresh(); }
+
 void HalDisplay::refreshDisplay(const RefreshMode mode, bool /*turnOffScreen*/) {
   if (!drmDisplay_.isOpen() && !fbInkDisplay_.isOpen()) {
     begin();
   }
   if (!drmDisplay_.isOpen() && !fbInkDisplay_.isOpen()) return;
-  const bool success = useDrm_ ? drmDisplay_.presentPackedMono(frameBuffer_.data(), frameBuffer_.size(), refreshKind(mode))
-                               : fbInkDisplay_.presentPackedMono(frameBuffer_.data(), frameBuffer_.size(), refreshKind(mode));
-  if (!success) {
-    std::fprintf(stderr, "[KOBO] display refresh failed: %d\n",
-                 useDrm_ ? drmDisplay_.lastError() : fbInkDisplay_.lastError());
-  }
+  const RefreshKind requested = refreshKind(mode);
+  (void)refreshExecutor_.present(drmDisplay_, fbInkDisplay_, useDrm_, frameBuffer_.data(), frameBuffer_.size(),
+                                 requested, refreshProfileQualified_);
 }
 
 void HalDisplay::deepSleep() {
   drmDisplay_.close();
   fbInkDisplay_.close();
+  refreshExecutor_.reset();
+  refreshProfileQualified_ = false;
 }
 
 std::uint8_t* HalDisplay::getFrameBuffer() const { return const_cast<std::uint8_t*>(frameBuffer_.data()); }

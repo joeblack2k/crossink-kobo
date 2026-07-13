@@ -334,8 +334,9 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   }
   ctx.lastDstY = -1;  // Reset row tracking
 
-  LOG_DBG("PNG", "PNG %dx%d -> %dx%d (scale %.2f), bpp: %d", ctx.srcWidth, ctx.srcHeight, ctx.dstWidth, ctx.dstHeight,
-          ctx.scale, png->getBpp());
+  LOG_DBG("PNG", "PNG %dx%d -> %dx%d target=(%d,%d %dx%d) orientation=%d (scale %.2f), bpp: %d", ctx.srcWidth,
+          ctx.srcHeight, ctx.dstWidth, ctx.dstHeight, config.x, config.y, config.maxWidth, config.maxHeight,
+          static_cast<int>(renderer.getOrientation()), ctx.scale, png->getBpp());
 
   const int pixelType = png->getPixelType();
   const int requiredInternal = requiredPngInternalBufferBytes(ctx.srcWidth, pixelType);

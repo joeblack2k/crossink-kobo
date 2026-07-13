@@ -10,6 +10,8 @@
 #include "CrossPointSettings.h"
 #include "EpubReaderClippingListActivity.h"
 #include "MappedInputManager.h"
+#include "components/KoboIconMetrics.h"
+#include "components/TouchUiRegistry.h"
 #include "components/UITheme.h"
 #include "components/icons/settings2.h"
 #include "fontIds.h"
@@ -23,10 +25,40 @@ constexpr uint8_t MenuIcon24[] = {
     0xf3, 0xe7, 0xcf, 0xf3, 0xe7, 0xcf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 static_assert(sizeof(MenuIcon24) == 24 * ((24 + 7) / 8), "MenuIcon24 must contain 24 rows of 1-bit icon data");
 
-constexpr int tabIconSize = 24;
+constexpr int tabIconSourceSize = 24;
 constexpr int selectedTabBoxWidth = 50;
 constexpr int selectedTabBoxHeight = 34;
 constexpr int selectedTabBoxRadius = 2;
+constexpr int kFrontlightStepPercent = 10;
+constexpr int kFrontlightSegmentCount = 11;  // 0%, 10%, … 100%
+
+uint8_t normalizeFrontlightStep(const int percent) {
+  const int clamped = std::clamp(percent, 0, 100);
+  return static_cast<uint8_t>(((clamped + kFrontlightStepPercent / 2) / kFrontlightStepPercent) *
+                              kFrontlightStepPercent);
+}
+
+struct FrontlightSliderLayout {
+  Rect panel;
+  Rect track;
+};
+
+FrontlightSliderLayout frontlightSliderLayout(const GfxRenderer& renderer, const ThemeMetrics& metrics,
+                                              const Rect& screen) {
+  const int labelHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  // Eleven horizontal 10%-segments cannot each be 9 mm wide on this panel,
+  // so make the shared vertical target deliberately generous instead.  The
+  // fixed 96 px footer is outside `screen`; leave a further tactile gap so a
+  // low tap cannot fall through to the footer's logical button mapping.
+  const int trackHeight = std::max(64, metrics.listRowHeight / 2);
+  const int panelHeight = labelHeight + trackHeight + metrics.verticalSpacing + 12;
+  const int footerClearance = std::max(24, metrics.verticalSpacing * 2);
+  const int panelX = screen.x + metrics.contentSidePadding;
+  const int panelY = std::max(screen.y, screen.y + screen.height - footerClearance - panelHeight);
+  return {Rect{panelX, panelY, screen.width - metrics.contentSidePadding * 2, panelHeight},
+          Rect{panelX, panelY + labelHeight + metrics.verticalSpacing / 2,
+               screen.width - metrics.contentSidePadding * 2, trackHeight}};
+}
 
 struct ReaderLayoutSettingsSnapshot {
   uint8_t fontFamily;
@@ -92,11 +124,12 @@ bool haveReaderLayoutSettingsChanged(const ReaderLayoutSettingsSnapshot& before)
   return before != captureReaderLayoutSettings();
 }
 
-void drawBookmarkTabIcon(const GfxRenderer& renderer, int x, int y, const bool foregroundBlack = true) {
-  constexpr int ribbonWidth = 16;
-  constexpr int ribbonHeight = 22;
-  constexpr int notchSize = 6;
-  const int iconX = x + (tabIconSize - ribbonWidth) / 2;
+void drawBookmarkTabIcon(const GfxRenderer& renderer, int x, int y, const int iconSize,
+                         const bool foregroundBlack = true) {
+  const int ribbonWidth = std::max(16, iconSize / 2);
+  const int ribbonHeight = std::max(22, iconSize * 11 / 16);
+  const int notchSize = std::max(6, iconSize * 3 / 16);
+  const int iconX = x + (iconSize - ribbonWidth) / 2;
   const int iconY = y + 1;
   const int centerX = iconX + ribbonWidth / 2;
 
@@ -106,24 +139,26 @@ void drawBookmarkTabIcon(const GfxRenderer& renderer, int x, int y, const bool f
 }
 
 void drawReaderMenuBitmapIcon(const GfxRenderer& renderer, const uint8_t bitmap[], const int x, const int y,
-                              const int width, const int height, const bool foregroundBlack = true) {
-  if (bitmap == nullptr || width <= 0 || height <= 0) {
+                              const int sourceSize, const int destinationSize, const bool foregroundBlack = true) {
+  if (bitmap == nullptr || sourceSize <= 0 || destinationSize <= 0) {
     return;
   }
 
-  const int stride = (width + 7) / 8;
-  for (int row = 0; row < height; ++row) {
-    const int srcOffset = row * stride;
-    for (int col = 0; col < width; ++col) {
-      const uint8_t mask = static_cast<uint8_t>(0x80 >> (col & 7));
-      if ((bitmap[srcOffset + (col >> 3)] & mask) != 0) {
+  const int stride = (sourceSize + 7) / 8;
+  for (int row = 0; row < destinationSize; ++row) {
+    const int sourceRow = row * sourceSize / destinationSize;
+    const int srcOffset = sourceRow * stride;
+    for (int col = 0; col < destinationSize; ++col) {
+      const int sourceCol = col * sourceSize / destinationSize;
+      const uint8_t mask = static_cast<uint8_t>(0x80 >> (sourceCol & 7));
+      if ((bitmap[srcOffset + (sourceCol >> 3)] & mask) != 0) {
         continue;
       }
 
       // Icon assets are authored for the legacy portrait blitter. Keep that
       // source rotation, but route placement through logical coordinates so
       // landscape and inverted reader menus keep the tabs centered.
-      renderer.drawPixel(x + width - 1 - row, y + col, foregroundBlack);
+      renderer.drawPixel(x + destinationSize - 1 - row, y + col, foregroundBlack);
     }
   }
 }
@@ -174,6 +209,9 @@ EpubReaderMenuActivity::TabMenuItems EpubReaderMenuActivity::buildMenuItems(bool
   bookmarkItems.reserve(8 + (hasBookmarks ? 2u : 0u) + (hasClippings ? 1u : 0u));
   settingsItems.reserve(2 + (showReadingPaceReset ? 1u : 0u));
 
+  // Closing a book must be a visible, direct reader action.  Back only
+  // dismisses this overlay; it must never be the hidden route to Home.
+  mainItems.push_back({MenuAction::GO_HOME, StrId::STR_CLOSE_BOOK});
   if (hasFootnotes) {
     mainItems.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
   }
@@ -187,7 +225,11 @@ EpubReaderMenuActivity::TabMenuItems EpubReaderMenuActivity::buildMenuItems(bool
       {MenuAction::TOGGLE_COMPLETED, isBookCompleted ? StrId::STR_MARK_UNFINISHED : StrId::STR_MARK_FINISHED});
 
   bookmarkItems.push_back({MenuAction::SYNC, StrId::STR_SYNC_PROGRESS});
+#ifndef KOBO_LINUX
+  // ESP-NOW has no equivalent on the Glo HD yet. Keep the menu honest until
+  // the planned Linux LAN discovery/position-sync backend is implemented.
   bookmarkItems.push_back({MenuAction::NEARBY_POSITION_SYNC, StrId::STR_NEARBY_POSITION_SYNC});
+#endif
   bookmarkItems.push_back({MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING});
   if (hasClippings) {
     bookmarkItems.push_back({MenuAction::VIEW_CLIPPINGS, StrId::STR_VIEW_CLIPPINGS});
@@ -231,6 +273,7 @@ void EpubReaderMenuActivity::finishCancelled() {
 }
 
 void EpubReaderMenuActivity::drawIconTabBar(const Rect rect) const {
+  const int tabIconSize = KoboIconMetrics::tabSize(UITheme::getInstance().getMetrics(), tabIconSourceSize);
   renderer.drawLine(rect.x, rect.y, rect.x + rect.width - 1, rect.y, true);
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
 
@@ -241,30 +284,49 @@ void EpubReaderMenuActivity::drawIconTabBar(const Rect rect) const {
     const int centerX = slotX + slotWidth / 2;
     const bool selected = i == activeTabIndex();
     const bool tabFocused = selected && selectedIndex < 0;
-    const int boxX = centerX - selectedTabBoxWidth / 2;
-    const int boxY = rect.y + (rect.height - selectedTabBoxHeight) / 2;
+    const int boxWidth = std::min(slotWidth - 8, std::max(selectedTabBoxWidth, tabIconSize + 20));
+    const int boxHeight = std::min(rect.height - 8, std::max(selectedTabBoxHeight, tabIconSize + 12));
+    const int boxX = centerX - boxWidth / 2;
+    const int boxY = rect.y + (rect.height - boxHeight) / 2;
     const int iconX = centerX - tabIconSize / 2;
     const int iconY = rect.y + (rect.height - tabIconSize) / 2;
 
+#ifdef KOBO_LINUX
+    // The tab bar is a primary reader control on the touch-only Glo HD.  It
+    // must select the requested tab directly rather than emulating the X4's
+    // focused-row/Confirm sequence.
+    TOUCH_UI.registerDirect(slotX, rect.y, slotWidth, rect.height, TouchUiRegistry::TargetKind::Tab,
+                            static_cast<int>(i));
+#endif
+
     if (tabFocused) {
-      renderer.fillRoundedRect(boxX, boxY, selectedTabBoxWidth, selectedTabBoxHeight, selectedTabBoxRadius,
-                               Color::Black);
+      renderer.fillRoundedRect(boxX, boxY, boxWidth, boxHeight, selectedTabBoxRadius, Color::Black);
     } else if (selected) {
-      renderer.drawRoundedRect(boxX, boxY, selectedTabBoxWidth, selectedTabBoxHeight, 1, selectedTabBoxRadius, true);
+      renderer.drawRoundedRect(boxX, boxY, boxWidth, boxHeight, 1, selectedTabBoxRadius, true);
     }
 
     if (i == static_cast<size_t>(MenuTab::Main)) {
-      drawReaderMenuBitmapIcon(renderer, MenuIcon24, iconX, iconY, tabIconSize, tabIconSize, !tabFocused);
+      drawReaderMenuBitmapIcon(renderer, MenuIcon24, iconX, iconY, tabIconSourceSize, tabIconSize, !tabFocused);
     } else if (i == static_cast<size_t>(MenuTab::Bookmarks)) {
-      drawBookmarkTabIcon(renderer, iconX, iconY, !tabFocused);
+      drawBookmarkTabIcon(renderer, iconX, iconY, tabIconSize, !tabFocused);
     } else {
-      drawReaderMenuBitmapIcon(renderer, Settings2Icon24, iconX, iconY, tabIconSize, tabIconSize, !tabFocused);
+      drawReaderMenuBitmapIcon(renderer, Settings2Icon24, iconX, iconY, tabIconSourceSize, tabIconSize, !tabFocused);
     }
   }
 }
 
 void EpubReaderMenuActivity::onEnter() {
   Activity::onEnter();
+#ifdef KOBO_LINUX
+  // This control deliberately exposes only eleven large touch steps.  Persist
+  // the nearest step as soon as it opens, so its label and highlighted segment
+  // can never disagree with an older 1%-granular setting.
+  const uint8_t normalized = normalizeFrontlightStep(SETTINGS.frontlightBrightness);
+  if (SETTINGS.frontlightBrightness != normalized) {
+    SETTINGS.frontlightBrightness = normalized;
+    SETTINGS.saveToFile();
+  }
+#endif
   requestUpdate();
 }
 
@@ -272,6 +334,39 @@ void EpubReaderMenuActivity::onExit() { Activity::onExit(); }
 
 void EpubReaderMenuActivity::loop() {
   if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+
+#if defined(SIMULATOR) || defined(KOBO_LINUX)
+  int directMenuItem = 0;
+  int ignoredCurrent = 0;
+  if (mappedInput.consumeNavigationTouchTarget(directMenuItem, ignoredCurrent) && directMenuItem >= 0 &&
+      directMenuItem < static_cast<int>(activeMenuItems().size())) {
+    selectedIndex = directMenuItem;
+    // Reuse the existing action path in this same frame; unlike the old
+    // queue, no intermediate selection is painted.
+    mappedInput.injectRelease(MappedInputManager::Button::Confirm);
+  }
+  MappedInputManager::TouchTarget touchTarget;
+  if (mappedInput.consumeTouchTarget(touchTarget)) {
+#ifdef KOBO_LINUX
+    if (touchTarget.kind == static_cast<unsigned char>(TouchUiRegistry::TargetKind::Slider)) {
+      const uint8_t snapped = normalizeFrontlightStep(touchTarget.primary);
+      if (SETTINGS.frontlightBrightness != snapped) {
+        SETTINGS.frontlightBrightness = snapped;
+        SETTINGS.saveToFile();
+      }
+      requestUpdate();
+      return;
+    }
+#endif
+    if (touchTarget.kind == static_cast<unsigned char>(TouchUiRegistry::TargetKind::Tab) && touchTarget.primary >= 0 &&
+        touchTarget.primary < MENU_TAB_COUNT) {
+      activeTab = static_cast<MenuTab>(touchTarget.primary);
+      focusTabRow();
+      requestUpdate();
+      return;
+    }
+  }
+#endif
 
   // Handle navigation
   buttonNavigator.onNextRelease([this] {
@@ -404,7 +499,12 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
 
   const int contentTop =
       screen.y + metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight * 2 + metrics.verticalSpacing;
-  const int contentHeight = screen.height - contentTop - metrics.verticalSpacing;
+#ifdef KOBO_LINUX
+  const auto frontlight = frontlightSliderLayout(renderer, metrics, screen);
+  const int contentHeight = std::max(0, frontlight.panel.y - contentTop - metrics.verticalSpacing);
+#else
+  const int contentHeight = std::max(0, screen.y + screen.height - contentTop);
+#endif
   const auto& items = activeMenuItems();
 
   GUI.drawList(
@@ -427,6 +527,40 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
         }
       },
       true);
+
+#ifdef KOBO_LINUX
+  // The reader menu is the only screen that a Kobo user is guaranteed to have
+  // open while reading, so expose a large direct frontlight control here
+  // rather than sending them through nested Settings. Each segment owns its
+  // exact paint and touch rect; values are deliberately limited to 10% steps.
+  const std::string frontlightLabel =
+      std::string(tr(STR_FRONTLIGHT)) + ": " + std::to_string(SETTINGS.frontlightBrightness) + "%";
+  renderer.drawText(UI_10_FONT_ID, frontlight.panel.x, frontlight.panel.y, frontlightLabel.c_str(), true,
+                    EpdFontFamily::BOLD);
+  constexpr int segmentGap = 4;
+  const int segmentWidth =
+      std::max(1, (frontlight.track.width - segmentGap * (kFrontlightSegmentCount - 1)) / kFrontlightSegmentCount);
+  const int renderedTrackWidth = segmentWidth * kFrontlightSegmentCount + segmentGap * (kFrontlightSegmentCount - 1);
+  for (int step = 0; step < kFrontlightSegmentCount; ++step) {
+    const int x = frontlight.track.x + step * (segmentWidth + segmentGap);
+    const int value = step * kFrontlightStepPercent;
+    const bool active = SETTINGS.frontlightBrightness >= value;
+    renderer.fillRoundedRect(x, frontlight.track.y, segmentWidth, frontlight.track.height, 2,
+                             active ? Color::Black : Color::White);
+    renderer.drawRoundedRect(x, frontlight.track.y, segmentWidth, frontlight.track.height, 1, 2, true, true, true, true,
+                             true);
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerDirect(x, frontlight.track.y, segmentWidth, frontlight.track.height,
+                            TouchUiRegistry::TargetKind::Slider, value);
+#endif
+  }
+  // Keep the bar's outer edge explicit when integer segment widths leave a
+  // few pixels unused at 100–250% density.
+  if (renderedTrackWidth < frontlight.track.width) {
+    renderer.drawLine(frontlight.track.x + renderedTrackWidth, frontlight.track.y,
+                      frontlight.track.x + renderedTrackWidth, frontlight.track.y + frontlight.track.height - 1, true);
+  }
+#endif
 
   // Footer / Hints
   const auto confirmLabel = selectedIndex < 0 ? tr(STR_NEXT_FIELD) : tr(STR_SELECT);
