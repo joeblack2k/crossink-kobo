@@ -6,13 +6,15 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: deploy-dev.sh --binary PATH --manifest PATH [--display-smoke PATH] [--host SSH_ALIAS] [--version VERSION]
+Usage: deploy-dev.sh --binary PATH --manifest PATH [--display-smoke PATH] [--expect-current-release PATH] [--host SSH_ALIAS] [--version VERSION]
 
 Installs PATH as /opt/crossink/releases/VERSION/bin/crossink-kobo, atomically
 switches /opt/crossink/current, restarts the supervisor, and verifies the
 deployed SHA-256. The previous symlink target remains intact for rollback.
 When provided, --display-smoke installs the separately built diagnostic tool
 into the same versioned slot and verifies its SHA-256 after activation.
+--expect-current-release makes activation fail unless /opt/crossink/current is
+still the exact release path observed before this deployment.
 EOF
   exit 2
 }
@@ -20,6 +22,7 @@ EOF
 binary=
 manifest=
 display_smoke=
+expected_current_release=
 host=crossink-n437
 version=
 while (($#)); do
@@ -27,6 +30,7 @@ while (($#)); do
     --binary) binary=${2:?missing value}; shift 2 ;;
     --manifest) manifest=${2:?missing value}; shift 2 ;;
     --display-smoke) display_smoke=${2:?missing value}; shift 2 ;;
+    --expect-current-release) expected_current_release=${2:?missing value}; shift 2 ;;
     --host) host=${2:?missing value}; shift 2 ;;
     --version) version=${2:?missing value}; shift 2 ;;
     *) usage ;;
@@ -52,6 +56,12 @@ if [[ -z "$version" ]]; then
   version="dev-${local_sha:0:12}"
 fi
 [[ "$version" =~ ^[A-Za-z0-9._-]+$ ]] || { echo 'Invalid release version' >&2; exit 2; }
+if [[ -n "$expected_current_release" ]]; then
+  [[ "$expected_current_release" =~ ^/opt/crossink/releases/[A-Za-z0-9._-]+$ ]] || {
+    echo 'Invalid expected current release path' >&2
+    exit 2
+  }
+fi
 
 remote_stage="/tmp/crossink-deploy-${version}-$$"
 
@@ -69,6 +79,12 @@ ssh -o BatchMode=yes "$host" '
   test -x /usr/sbin/crossink-supervisor
   mkdir -p /opt/crossink/releases
 '
+if [[ -n "$expected_current_release" ]]; then
+  ssh -o BatchMode=yes "$host" "test \"\$(readlink /opt/crossink/current)\" = '$expected_current_release'" || {
+    echo "Refusing deployment: current release changed from expected $expected_current_release" >&2
+    exit 74
+  }
+fi
 
 tar -C "$(dirname "$binary")" -cf - "$(basename "$binary")" |
   ssh -o BatchMode=yes "$host" "set -eu; umask 077; mkdir -p '$remote_stage'; tar -C '$remote_stage' -xf -"
@@ -102,6 +118,10 @@ ssh -o BatchMode=yes "$host" "
   fi
   previous=none
   if [ -L /opt/crossink/current ]; then previous=\$(readlink /opt/crossink/current || printf broken); fi
+  test -z '$expected_current_release' || test "\$previous" = '$expected_current_release' || {
+    echo "Current release changed during staging: \$previous" >&2
+    exit 74
+  }
   printf '%s\\n' \"\$previous\" > \"\$release/previous-release.txt\"
   sync
   ln -s \"\$release\" /opt/crossink/current.new
