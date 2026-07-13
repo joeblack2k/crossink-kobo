@@ -81,6 +81,18 @@ int KoboCpuFreqGuard::maximumFrequencyKhz() const {
   return readText("cpuinfo_max_freq", value) && parseInteger(value, parsed) ? parsed : -1;
 }
 
+std::string KoboCpuFreqGuard::currentGovernor() const {
+  std::string value;
+  if (!readText("scaling_governor", value)) return {};
+  // Sysfs writes replace an attribute atomically.  The host test uses ordinary
+  // files, where a shorter replacement can leave trailing bytes; returning the
+  // first policy token keeps the test double faithful to sysfs semantics.
+  std::istringstream input(value);
+  std::string governor;
+  input >> governor;
+  return governor;
+}
+
 bool KoboCpuFreqGuard::supportsFrequency(const int khz) const {
   std::string values;
   return readText("scaling_available_frequencies", values) && tokenPresent(values, std::to_string(khz));

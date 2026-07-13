@@ -22,6 +22,7 @@ class KoboCpuFreqGuard final {
   [[nodiscard]] bool active() const { return active_; }
   [[nodiscard]] int currentFrequencyKhz() const;
   [[nodiscard]] int maximumFrequencyKhz() const;
+  [[nodiscard]] std::string currentGovernor() const;
   [[nodiscard]] const std::string& lastError() const { return lastError_; }
 
  private:

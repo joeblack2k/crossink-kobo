@@ -50,9 +50,9 @@ if(KOBO_BUILD_DISPLAY)
 	# the sysfs HAL explicit so static-library consumers receive its symbols too.
 	target_link_libraries(crossink_kobo_hal_display PUBLIC crossink_kobo_display crossink_kobo_sysfs)
 
-	add_executable(crossink-kobo-display-smoke tools/display-smoke.cpp)
+	add_executable(crossink-kobo-display-smoke tools/display-smoke.cpp tools/DisplayBenchmark.cpp)
 	target_compile_options(crossink-kobo-display-smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
-	target_include_directories(crossink-kobo-display-smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/sysfs")
+	target_include_directories(crossink-kobo-display-smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/sysfs" "${CMAKE_CURRENT_SOURCE_DIR}/tools")
 	target_link_libraries(crossink-kobo-display-smoke PRIVATE crossink_kobo_display crossink_kobo_sysfs)
 endif()
 
@@ -221,6 +221,11 @@ if(BUILD_TESTING)
 	target_include_directories(crossink-kobo-refresh-scheduler-test PRIVATE display)
 	target_compile_options(crossink-kobo-refresh-scheduler-test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 	add_test(NAME crossink-kobo-refresh-scheduler COMMAND crossink-kobo-refresh-scheduler-test)
+
+	add_executable(crossink-kobo-display-benchmark-test tests/display-benchmark-test.cpp tools/DisplayBenchmark.cpp)
+	target_include_directories(crossink-kobo-display-benchmark-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+	target_compile_options(crossink-kobo-display-benchmark-test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+	add_test(NAME crossink-kobo-display-benchmark COMMAND crossink-kobo-display-benchmark-test)
 
 	add_executable(crossink-kobo-render-scheduler-test tests/render-scheduler-test.cpp compat/KoboRenderScheduler.cpp)
 	target_include_directories(crossink-kobo-render-scheduler-test PRIVATE compat)

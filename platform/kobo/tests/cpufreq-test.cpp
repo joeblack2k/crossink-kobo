@@ -37,7 +37,7 @@ int main() {
   {
     KoboCpuFreqGuard guard(root.string());
     if (!guard.beginPerformanceBoost() || !guard.active() || guard.currentFrequencyKhz() != 792000 ||
-        guard.maximumFrequencyKhz() != 996000) {
+        guard.maximumFrequencyKhz() != 996000 || guard.currentGovernor() != "performance") {
       fail("valid cpufreq boost failed");
     }
     std::ifstream governor(root / "scaling_governor");
@@ -45,6 +45,7 @@ int main() {
     governor >> value;
     if (value != "performance") fail("performance governor was not selected");
     if (!guard.endPerformanceBoost() || guard.active()) fail("explicit governor restore failed");
+    if (guard.currentGovernor() != "ondemand") fail("governor query did not report restored policy");
     std::ifstream explicitlyRestored(root / "scaling_governor");
     explicitlyRestored >> value;
     if (value != "ondemand") fail("explicit governor restore did not restore ondemand");

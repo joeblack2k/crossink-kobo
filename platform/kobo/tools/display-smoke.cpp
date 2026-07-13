@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 
 #include <unistd.h>
 
+#include "DisplayBenchmark.h"
 #include "KoboDrmDisplay.h"
 #include "KoboFbInkDisplay.h"
 #include "KoboCpuFreq.h"
@@ -14,12 +16,29 @@
 
 using crossink::kobo::KoboFbInkDisplay;
 using crossink::kobo::KoboDrmDisplay;
+using crossink::kobo::RefreshRegion;
 using crossink::kobo::RefreshKind;
 using crossink::kobo::SourceTransform;
 
 namespace {
 
 using Frame = std::array<uint8_t, KoboFbInkDisplay::kPackedFrameBytes>;
+
+struct LogicalRegion {
+  uint16_t x;
+  uint16_t y;
+  uint16_t width;
+  uint16_t height;
+};
+
+// These are representative reader/UI dirty regions in logical portrait
+// coordinates: a text block, header action, list card and footer control.
+constexpr std::array<LogicalRegion, 4> kMixedRegions{{
+    {336U, 400U, 400U, 240U},
+    {32U, 48U, 176U, 64U},
+    {96U, 320U, 880U, 80U},
+    {704U, 840U, 256U, 320U},
+}};
 
 void setPixel(Frame& frame, uint16_t logicalX, uint16_t logicalY, bool white) {
   if (logicalX >= KoboFbInkDisplay::kPortraitWidth || logicalY >= KoboFbInkDisplay::kPortraitHeight) return;
@@ -59,6 +78,19 @@ void filledRectangle(Frame& frame, uint16_t x, uint16_t y, uint16_t width, uint1
   }
 }
 
+RefreshRegion toPanelRegion(const LogicalRegion& logical) {
+  // GfxRenderer portrait rotates clockwise into the DRM-native 1448x1072
+  // buffer. Keep the dirty rectangle in the same coordinate space as the
+  // changed pixels; otherwise benchmarked partial refreshes would be fake.
+  return {
+      .x = logical.y,
+      .y = static_cast<uint16_t>(KoboFbInkDisplay::kPanelHeight - logical.x - logical.width),
+      .width = logical.height,
+      .height = logical.width,
+      .changedBytes = static_cast<std::size_t>(logical.width) * logical.height / 8U,
+  };
+}
+
 SourceTransform parseTransform(const char* value, bool& ok) {
   ok = true;
   if (std::strcmp(value, "identity") == 0) return SourceTransform::Identity;
@@ -87,10 +119,10 @@ unsigned long parseUnsigned(const char* value, const unsigned long maximum, cons
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc < 2 || argc > 6) {
+  if (argc < 2 || argc > 7) {
     std::fprintf(stderr,
                  "usage: %s identity|clockwise|counterclockwise [fast|partial|full [iterations [delay-ms "
-                 "[--qualify-fast]]]]\n",
+                 "[--mixed] [--qualify-fast]]]]\n",
                  argv[0]);
     return 2;
   }
@@ -103,10 +135,21 @@ int main(int argc, char** argv) {
   if (!valid) return 2;
   const unsigned long delayMs = argc >= 5 ? parseUnsigned(argv[4], 60000, true, valid) : 0;
   if (!valid) return 2;
-  const bool qualifyFast = argc == 6;
-  if (qualifyFast && std::strcmp(argv[5], "--qualify-fast") != 0) return 2;
-  if (qualifyFast && (transform != SourceTransform::Identity || refresh != RefreshKind::Fast || iterations < 1000U)) {
-    std::fputs("Fast qualification requires identity transform, fast refresh and at least 1000 iterations\n", stderr);
+  bool qualifyFast = false;
+  bool mixedPattern = false;
+  for (int index = 5; index < argc; ++index) {
+    if (std::strcmp(argv[index], "--qualify-fast") == 0) qualifyFast = true;
+    else if (std::strcmp(argv[index], "--mixed") == 0) mixedPattern = true;
+    else return 2;
+  }
+  if (mixedPattern && transform != SourceTransform::Identity) {
+    std::fputs("Mixed qualification only supports logical portrait identity\n", stderr);
+    return 2;
+  }
+  if (qualifyFast &&
+      (transform != SourceTransform::Identity || refresh != RefreshKind::Fast || iterations < 1000U || !mixedPattern)) {
+    std::fputs("Fast qualification requires identity transform, fast refresh, mixed regions and at least 1000 iterations\n",
+               stderr);
     return 2;
   }
 
@@ -129,20 +172,36 @@ int main(int argc, char** argv) {
     // governor on every return path.
     crossink::kobo::KoboCpuFreqGuard cpuBoost;
     const int baselineTemperature = crossink::kobo::readSocTemperatureMilliC();
+    const int cpuBefore = cpuBoost.currentFrequencyKhz();
+    const std::string governorBefore = cpuBoost.currentGovernor();
     if (qualifyFast && (baselineTemperature < 0 || !cpuBoost.beginPerformanceBoost())) {
       std::fprintf(stderr, "Fast qualification unavailable: temperature=%d cpu=%s\n", baselineTemperature,
                    cpuBoost.lastError().c_str());
       return 1;
     }
+    const int cpuDuring = cpuBoost.currentFrequencyKhz();
+    const std::string governorDuring = cpuBoost.currentGovernor();
     const auto start = std::chrono::steady_clock::now();
+    static std::array<std::uint32_t, 10000> submitMicros{};
     for (unsigned long iteration = 0; iteration < iterations; ++iteration) {
       // Toggle a bounded central region so repeated refreshes exercise changed
       // pixels without destroying the orientation and button-frame markers.
-      filledRectangle(frame, 336, 400, 400, 240, (iteration % 2U) != 0U);
-      if (!drm.presentPackedMono(frame.data(), frame.size(), refresh)) {
+      const LogicalRegion logical = mixedPattern ? kMixedRegions[iteration % kMixedRegions.size()] : kMixedRegions[0];
+      filledRectangle(frame, logical.x, logical.y, logical.width, logical.height, (iteration % 2U) != 0U);
+      const RefreshRegion region = toPanelRegion(logical);
+      const auto submitted = std::chrono::steady_clock::now();
+      if (!drm.presentPackedMono(frame.data(), frame.size(), refresh, region)) {
         std::fprintf(stderr, "DRM display refresh failed at iteration %lu: %d\n", iteration + 1, drm.lastError());
         return 1;
       }
+      const auto completed = std::chrono::steady_clock::now();
+      const auto submitMicrosValue =
+          std::chrono::duration_cast<std::chrono::microseconds>(completed - submitted).count();
+      if (submitMicrosValue < 0 || submitMicrosValue > static_cast<long long>(UINT32_MAX)) {
+        std::fputs("DRM display submit timing overflow\n", stderr);
+        return 1;
+      }
+      submitMicros[iteration] = static_cast<std::uint32_t>(submitMicrosValue);
       if (qualifyFast && (iteration % 10U) == 0U) {
         const int temperature = crossink::kobo::readSocTemperatureMilliC();
         if (temperature < 0 || temperature >= 75000 || temperature - baselineTemperature >= 15000) {
@@ -158,8 +217,20 @@ int main(int argc, char** argv) {
       std::fputs("Fast qualification governor restore failed\n", stderr);
       return 1;
     }
+    const int cpuAfter = cpuBoost.currentFrequencyKhz();
+    const std::string governorAfter = cpuBoost.currentGovernor();
+    const int finalTemperature = crossink::kobo::readSocTemperatureMilliC();
     std::printf("backend=drm geometry=%ux%u iterations=%lu elapsed_ms=%lld\n", KoboFbInkDisplay::kPortraitWidth,
                 KoboFbInkDisplay::kPortraitHeight, iterations, static_cast<long long>(elapsed.count()));
+    const auto summary = crossink::kobo::summarizeDisplaySubmissionMicros(submitMicros.data(), iterations);
+    std::printf("pattern=%s waveform=%s submit_us_min=%u p50=%u p95=%u max=%u total=%llu cpu_before_khz=%d "
+                "cpu_during_khz=%d cpu_after_khz=%d governor_before=%s governor_during=%s governor_after=%s "
+                "temp_before_millic=%d temp_after_millic=%d\n",
+                mixedPattern ? "mixed" : "fixed", refresh == RefreshKind::Fast ? "DU" :
+                (refresh == RefreshKind::Partial ? "AUTO" : "GC16"), summary.minimumMicros, summary.p50Micros,
+                summary.p95Micros, summary.maximumMicros, static_cast<unsigned long long>(summary.totalMicros), cpuBefore,
+                cpuDuring, cpuAfter, governorBefore.c_str(), governorDuring.c_str(), governorAfter.c_str(),
+                baselineTemperature, finalTemperature);
     if (qualifyFast) {
       // Persist only after all iterations succeeded and the prior governor
       // was restored.  A marker is device/kernel-bound and never created by
