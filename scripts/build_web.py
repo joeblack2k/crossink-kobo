@@ -13,6 +13,7 @@ import os
 import re
 import gzip
 import hashlib
+import io
 
 try:
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -82,7 +83,17 @@ def read(*parts):
         return f.read()
 
 def emit_gzip(path, ident, text):
-    gz = gzip.compress(text.encode("utf-8"), compresslevel=9)
+    # The generated headers are compiled into the firmware, so their bytes must
+    # be independent of the wall clock and host OS.  gzip.compress() defaults
+    # to the current timestamp, which made an otherwise identical portal alter
+    # every ARM binary on each invocation.  GzipFile also lets us pin filename
+    # and mtime in the header explicitly.
+    compressed = io.BytesIO()
+    with gzip.GzipFile(
+        fileobj=compressed, mode="wb", filename="", mtime=0, compresslevel=9
+    ) as archive:
+        archive.write(text.encode("utf-8"))
+    gz = compressed.getvalue()
     emit_header(path, ident, gz, original_len=len(text))
     return len(text), len(gz)
 
