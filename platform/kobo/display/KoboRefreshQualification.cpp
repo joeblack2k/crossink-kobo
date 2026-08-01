@@ -33,9 +33,7 @@ struct QualificationCache {
 
 QualificationCache qualificationCache;
 
-std::size_t cacheIndex(const RefreshProfile profile) {
-  return profile == RefreshProfile::Fast ? 0U : 1U;
-}
+std::size_t cacheIndex(const RefreshProfile profile) { return profile == RefreshProfile::Fast ? 0U : 1U; }
 
 bool qualificationPaths(const RefreshProfile profile, QualificationPaths& paths) {
   switch (profile) {
@@ -154,12 +152,13 @@ bool koboRefreshProfileQualified(const RefreshProfile profile) {
   const int binaryLength = std::snprintf(expectedBinary, sizeof(expectedBinary), "binary_sha256=%s", binarySha);
   char expectedProfile[40]{};
   const int profileLength = std::snprintf(expectedProfile, sizeof(expectedProfile), "profile=%s", paths.profile);
-  const bool qualified = versionLength > 0 && versionLength < static_cast<int>(sizeof(expectedVersion)) && kernelLength > 0 &&
-         kernelLength < static_cast<int>(sizeof(expectedKernel)) && binaryLength > 0 &&
-         binaryLength < static_cast<int>(sizeof(expectedBinary)) && profileLength > 0 &&
-         profileLength < static_cast<int>(sizeof(expectedProfile)) && containsLine(content, expectedVersion) &&
-         containsLine(content, expectedProfile) && containsLine(content, "model=Kobo Glo HD") &&
-         containsLine(content, expectedKernel) && containsLine(content, expectedBinary);
+  const bool qualified = versionLength > 0 && versionLength < static_cast<int>(sizeof(expectedVersion)) &&
+                         kernelLength > 0 && kernelLength < static_cast<int>(sizeof(expectedKernel)) &&
+                         binaryLength > 0 && binaryLength < static_cast<int>(sizeof(expectedBinary)) &&
+                         profileLength > 0 && profileLength < static_cast<int>(sizeof(expectedProfile)) &&
+                         containsLine(content, expectedVersion) && containsLine(content, expectedProfile) &&
+                         containsLine(content, "model=Kobo Glo HD") && containsLine(content, expectedKernel) &&
+                         containsLine(content, expectedBinary);
   qualificationCache.qualified[index] = qualified;
   return qualified;
 }
