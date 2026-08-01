@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Atomically deploy one already-built CrossInk binary to a development Kobo.
+# This intentionally never writes a boot or rootfs partition: only the
+# versioned application slot used by crossink-supervisor is touched.
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: deploy-dev.sh --binary PATH --manifest PATH [--display-smoke PATH] [--expect-current-release PATH] [--host SSH_ALIAS] [--version VERSION]
+
+Installs PATH as /opt/crossink/releases/VERSION/bin/crossink-kobo, atomically
+switches /opt/crossink/current, restarts the supervisor, and verifies the
+deployed SHA-256. The previous symlink target remains intact for rollback.
+When provided, --display-smoke installs the separately built diagnostic tool
+into the same versioned slot and verifies its SHA-256 after activation.
+--expect-current-release makes activation fail unless /opt/crossink/current is
+still the exact release path observed before this deployment.
+EOF
+  exit 2
+}
+
+binary=
+manifest=
+display_smoke=
+expected_current_release=
+host=crossink-n437
+version=
+while (($#)); do
+  case "$1" in
+    --binary) binary=${2:?missing value}; shift 2 ;;
+    --manifest) manifest=${2:?missing value}; shift 2 ;;
+    --display-smoke) display_smoke=${2:?missing value}; shift 2 ;;
+    --expect-current-release) expected_current_release=${2:?missing value}; shift 2 ;;
+    --host) host=${2:?missing value}; shift 2 ;;
+    --version) version=${2:?missing value}; shift 2 ;;
+    *) usage ;;
+  esac
+done
+
+[[ -n "$binary" && -n "$manifest" ]] || usage
+[[ -f "$binary" && -x "$binary" ]] || { echo "Missing executable: $binary" >&2; exit 1; }
+[[ -f "$manifest" ]] || { echo "Missing build manifest: $manifest" >&2; exit 1; }
+if [[ -n "$display_smoke" ]]; then
+  [[ -f "$display_smoke" && -x "$display_smoke" ]] || { echo "Missing display smoke executable: $display_smoke" >&2; exit 1; }
+fi
+
+local_sha=$(shasum -a 256 "$binary" | awk '{print $1}')
+display_smoke_sha=
+display_smoke_name=
+if [[ -n "$display_smoke" ]]; then
+  display_smoke_sha=$(shasum -a 256 "$display_smoke" | awk '{print $1}')
+  display_smoke_name=$(basename "$display_smoke")
+  [[ "$display_smoke_name" =~ ^[A-Za-z0-9._-]+$ ]] || { echo 'Invalid display smoke filename' >&2; exit 2; }
+fi
+if [[ -z "$version" ]]; then
+  version="dev-${local_sha:0:12}"
+fi
+[[ "$version" =~ ^[A-Za-z0-9._-]+$ ]] || { echo 'Invalid release version' >&2; exit 2; }
+if [[ -n "$expected_current_release" ]]; then
+  [[ "$expected_current_release" =~ ^/opt/crossink/releases/[A-Za-z0-9._-]+$ ]] || {
+    echo 'Invalid expected current release path' >&2
+    exit 2
+  }
+fi
+
+remote_stage="/tmp/crossink-deploy-${version}-$$"
+
+cleanup_remote() {
+  ssh -o BatchMode=yes "$host" "rm -rf '$remote_stage'" >/dev/null 2>&1 || true
+}
+trap cleanup_remote EXIT
+
+# Confirm the expected physical model before transferring data. This also
+# makes a disconnected USB-gadget link fail without changing the device.
+ssh -o BatchMode=yes "$host" '
+  set -eu
+  model=$(tr -d "\000" </proc/device-tree/model 2>/dev/null || true)
+  case "$model" in *"Kobo Glo HD"*|*"N437"*) ;; *) echo "Refusing non-N437 target: $model" >&2; exit 65 ;; esac
+  test -x /usr/sbin/crossink-supervisor
+  mkdir -p /opt/crossink/releases
+'
+if [[ -n "$expected_current_release" ]]; then
+  ssh -o BatchMode=yes "$host" "test \"\$(readlink /opt/crossink/current)\" = '$expected_current_release'" || {
+    echo "Refusing deployment: current release changed from expected $expected_current_release" >&2
+    exit 74
+  }
+fi
+
+tar -C "$(dirname "$binary")" -cf - "$(basename "$binary")" |
+  ssh -o BatchMode=yes "$host" "set -eu; umask 077; mkdir -p '$remote_stage'; tar -C '$remote_stage' -xf -"
+tar -C "$(dirname "$manifest")" -cf - "$(basename "$manifest")" |
+  ssh -o BatchMode=yes "$host" "set -eu; tar -C '$remote_stage' -xf -"
+if [[ -n "$display_smoke" ]]; then
+  tar -C "$(dirname "$display_smoke")" -cf - "$(basename "$display_smoke")" |
+    ssh -o BatchMode=yes "$host" "set -eu; tar -C '$remote_stage' -xf -"
+fi
+
+remote_sha=$(ssh -o BatchMode=yes "$host" "sha256sum '$remote_stage/$(basename "$binary")' | awk '{print \$1}'")
+[[ "$remote_sha" == "$local_sha" ]] || { echo "Transfer checksum mismatch: $remote_sha != $local_sha" >&2; exit 1; }
+if [[ -n "$display_smoke" ]]; then
+  remote_display_smoke_sha=$(ssh -o BatchMode=yes "$host" "sha256sum '$remote_stage/$display_smoke_name' | awk '{print \$1}'")
+  [[ "$remote_display_smoke_sha" == "$display_smoke_sha" ]] || {
+    echo "Display smoke transfer checksum mismatch: $remote_display_smoke_sha != $display_smoke_sha" >&2
+    exit 1
+  }
+fi
+
+ssh -o BatchMode=yes "$host" "
+  set -eu
+  release='/opt/crossink/releases/$version'
+  stage='$remote_stage'
+  test ! -e \"\$release\" || { echo \"Release already exists: \$release\" >&2; exit 73; }
+  mkdir -p \"\$release/bin\"
+  install -m 0755 \"\$stage/$(basename "$binary")\" \"\$release/bin/crossink-kobo\"
+  install -m 0644 \"\$stage/$(basename "$manifest")\" \"\$release/build-manifest.txt\"
+  if [ -n '$display_smoke_name' ]; then
+    install -m 0755 "\$stage/$display_smoke_name" "\$release/bin/$display_smoke_name"
+  fi
+  previous=none
+  if [ -L /opt/crossink/current ]; then previous=\$(readlink /opt/crossink/current || printf broken); fi
+  test -z '$expected_current_release' || test "\$previous" = '$expected_current_release' || {
+    echo "Current release changed during staging: \$previous" >&2
+    exit 74
+  }
+  printf '%s\\n' \"\$previous\" > \"\$release/previous-release.txt\"
+  sync
+  ln -s \"\$release\" /opt/crossink/current.new
+  # BusyBox follows a symlink to a directory unless -T is supplied. Without
+  # it, the staged link is moved into the old release instead of replacing
+  # /opt/crossink/current.
+  mv -fT /opt/crossink/current.new /opt/crossink/current
+  /etc/init.d/S60crossink restart
+"
+
+sleep 3
+deployed_sha=$(ssh -o BatchMode=yes "$host" "sha256sum /opt/crossink/current/bin/crossink-kobo | awk '{print \$1}'")
+[[ "$deployed_sha" == "$local_sha" ]] || {
+  echo "Deployment checksum mismatch after activation: $deployed_sha != $local_sha" >&2
+  exit 1
+}
+if [[ -n "$display_smoke" ]]; then
+  deployed_display_smoke_sha=$(ssh -o BatchMode=yes "$host" "sha256sum /opt/crossink/current/bin/$display_smoke_name | awk '{print \$1}'")
+  [[ "$deployed_display_smoke_sha" == "$display_smoke_sha" ]] || {
+    echo "Display smoke deployment checksum mismatch: $deployed_display_smoke_sha != $display_smoke_sha" >&2
+    exit 1
+  }
+fi
+ssh -o BatchMode=yes "$host" "printf 'deployed=%s\\nsha256=%s\\n' \"\$(readlink /opt/crossink/current)\" '$deployed_sha'"

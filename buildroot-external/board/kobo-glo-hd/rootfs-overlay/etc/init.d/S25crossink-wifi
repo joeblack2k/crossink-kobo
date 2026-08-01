@@ -1,0 +1,17 @@
+#!/bin/sh
+
+case "${1:-}" in
+	start)
+		# Load only the firmware/driver.  Keep the radio interface down until the
+		# user enters a network activity; USB recovery remains independent.
+		modprobe brcmfmac
+		;;
+	stop)
+		ip link set wlan0 down 2>/dev/null || true
+		killall wpa_supplicant 2>/dev/null || true
+		;;
+	*)
+		echo "Usage: $0 {start|stop}" >&2
+		exit 1
+		;;
+esac

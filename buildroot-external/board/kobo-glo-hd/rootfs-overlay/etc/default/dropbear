@@ -1,0 +1,3 @@
+# Public-key-only development and recovery access. Root remains available with
+# the dedicated CrossInk Ed25519 key, never with an image password.
+DROPBEAR_ARGS="-s -g"

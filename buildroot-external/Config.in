@@ -1,0 +1,8 @@
+# CrossInk Kobo currently uses only upstream Buildroot packages.
+menu "CrossInk Kobo packages"
+
+source "$BR2_EXTERNAL_CROSSINK_KOBO_PATH/package/crossink-fbink/Config.in"
+source "$BR2_EXTERNAL_CROSSINK_KOBO_PATH/package/crossink-kobo-platform/Config.in"
+source "$BR2_EXTERNAL_CROSSINK_KOBO_PATH/package/crossink-kobo-app/Config.in"
+
+endmenu

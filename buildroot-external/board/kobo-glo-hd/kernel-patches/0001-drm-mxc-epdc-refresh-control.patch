@@ -1,0 +1,96 @@
+From: CrossInk Kobo <crossink-kobo@localhost>
+Subject: [PATCH] drm: mxc-epdc: expose controlled waveform selection
+
+The DRM damage ABI does not carry the e-paper waveform/update mode. Add one
+small driver-private ioctl so the CrossInk userspace backend can request DU,
+AUTO-partial or GC16-full before submitting a dirty framebuffer. Defaults stay
+AUTO/partial and values are validated against the loaded waveform table.
+
+--- a/drivers/gpu/drm/mxc-epdc/mxc_epdc.h
++++ b/drivers/gpu/drm/mxc-epdc/mxc_epdc.h
+@@ -103,5 +103,7 @@ struct mxc_epdc {
+ 	dma_addr_t waveform_buffer_phys;
+ 	u32 waveform_buffer_size;
++	u32 next_waveform_mode;
++	u32 next_update_mode;
+ 
+ 	struct mutex power_mutex;
+ 	bool powered;
+--- a/drivers/gpu/drm/mxc-epdc/mxc_epdc_drv.c
++++ b/drivers/gpu/drm/mxc-epdc/mxc_epdc_drv.c
+@@ -36,8 +36,42 @@
+ #define DRIVER_MINOR 0
+ #define DRIVER_PATCHLEVEL 0
+ 
++#define DRM_MXC_EPDC_SET_REFRESH 0x00
++struct drm_mxc_epdc_refresh {
++	__u32 waveform_mode;
++	__u32 update_mode;
++};
++#define DRM_IOCTL_MXC_EPDC_SET_REFRESH \
++	DRM_IOW(DRM_COMMAND_BASE + DRM_MXC_EPDC_SET_REFRESH, \
++		struct drm_mxc_epdc_refresh)
++
+ #define to_mxc_epdc(x) container_of(x, struct mxc_epdc, drm)
+ 
++static int mxc_epdc_set_refresh(struct drm_device *drm, void *data,
++				struct drm_file *file)
++{
++	struct mxc_epdc *priv = to_mxc_epdc(drm);
++	struct drm_mxc_epdc_refresh *request = data;
++
++	if (request->update_mode > UPDATE_MODE_FULL)
++		return -EINVAL;
++	if (request->waveform_mode != WAVEFORM_MODE_AUTO &&
++	    request->waveform_mode != priv->wv_modes.mode_du &&
++	    request->waveform_mode != priv->wv_modes.mode_gc16)
++		return -EINVAL;
++
++	mutex_lock(&priv->queue_mutex);
++	priv->next_waveform_mode = request->waveform_mode;
++	priv->next_update_mode = request->update_mode;
++	mutex_unlock(&priv->queue_mutex);
++	return 0;
++}
++
++static const struct drm_ioctl_desc mxc_epdc_ioctls[] = {
++	DRM_IOCTL_DEF_DRV(MXC_EPDC_SET_REFRESH, mxc_epdc_set_refresh,
++			  DRM_AUTH),
++};
++
+ static const struct drm_mode_config_funcs mxc_epdc_mode_config_funcs = {
+ 	.fb_create = drm_gem_fb_create_with_dirty,
+ 	.atomic_check	   = drm_atomic_helper_check,
+@@ -291,5 +325,7 @@ static struct drm_driver mxc_epdc_driver = {
+ 	.gem_prime_import_sg_table = drm_gem_dma_prime_import_sg_table,
+ 	DRM_FBDEV_TTM_DRIVER_OPS,
++	.ioctls = mxc_epdc_ioctls,
++	.num_ioctls = ARRAY_SIZE(mxc_epdc_ioctls),
+ 
+ 	.name = DRIVER_NAME,
+ 	.desc = DRIVER_DESC,
+@@ -325,6 +357,8 @@ static int mxc_epdc_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
++	priv->next_waveform_mode = WAVEFORM_MODE_AUTO;
++	priv->next_update_mode = UPDATE_MODE_PARTIAL;
+ 	ret = request_firmware(&firmware, "imx/epdc/epdc.fw", priv->drm.dev);
+ 	if (ret)
+ 		return ret;
+--- a/drivers/gpu/drm/mxc-epdc/epdc_update.c
++++ b/drivers/gpu/drm/mxc-epdc/epdc_update.c
+@@ -885,9 +885,11 @@ int mxc_epdc_send_single_update(struct drm_rect *clip, int pitch, void *vaddr,
+ 	}
+ 	/* Initialize per-update marker list */
+ 	upd_desc->upd_data.update_region = *clip;
+-	upd_desc->upd_data.waveform_mode = WAVEFORM_MODE_AUTO;
++	upd_desc->upd_data.waveform_mode = priv->next_waveform_mode;
+ 	upd_desc->upd_data.temp = TEMP_USE_AMBIENT;
+-	upd_desc->upd_data.update_mode = UPDATE_MODE_PARTIAL;
++	upd_desc->upd_data.update_mode = priv->next_update_mode;
++	priv->next_waveform_mode = WAVEFORM_MODE_AUTO;
++	priv->next_update_mode = UPDATE_MODE_PARTIAL;
+ 	upd_desc->update_order = priv->order_cnt++;
+ 	list_add_tail(&upd_desc->list, &priv->upd_pending_list);
+ 

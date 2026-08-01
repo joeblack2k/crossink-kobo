@@ -1,0 +1,98 @@
+#!/bin/sh
+# CrossInk process watchdog. Three early exits persistently select the own
+# recovery mode; a process that survives the health window clears the counter.
+set -u
+
+STATE_DIR=/data/.crossink/watchdog
+LOG_DIR=/data/.crossink/log
+CRASH_DIR=/data/.crossink/crash
+APP_LOG=$LOG_DIR/crossink.log
+ATTEMPTS_FILE=$STATE_DIR/early-start-failures
+RECOVERY_FLAG=/boot/flags/CROSSINK_FORCE_RECOVERY
+HEALTH_SECONDS=60
+app_pid=
+health_pid=
+
+mkdir -p "$STATE_DIR" "$LOG_DIR" "$CRASH_DIR"
+chmod 700 "$STATE_DIR" "$LOG_DIR" "$CRASH_DIR"
+if [ -e /boot/flags/CROSSINK_DEV_ENABLE ]; then
+	ulimit -c unlimited 2>/dev/null || true
+fi
+
+rotate_log() {
+	if [ -f "$APP_LOG" ] && [ "$(wc -c < "$APP_LOG")" -ge 1048576 ]; then
+		mv -f "$APP_LOG" "$APP_LOG.1"
+	fi
+}
+
+read_attempts() {
+	value=0
+	if [ -r "$ATTEMPTS_FILE" ]; then value=$(sed -n '1p' "$ATTEMPTS_FILE"); fi
+	case "$value" in ''|*[!0-9]*) value=0 ;; esac
+	printf '%s' "$value"
+}
+
+write_attempts() {
+	temporary=$ATTEMPTS_FILE.new
+	printf '%s\n' "$1" > "$temporary"
+	mv -f "$temporary" "$ATTEMPTS_FILE"
+	sync
+}
+
+find_application() {
+	for candidate in /opt/crossink/current/bin/crossink-kobo /usr/bin/crossink-kobo; do
+		if [ -x "$candidate" ]; then printf '%s' "$candidate"; return 0; fi
+	done
+	return 1
+}
+
+enter_recovery() {
+	exec /usr/sbin/crossink-kobo-recovery "$@"
+}
+
+terminate() {
+	if [ -n "$health_pid" ]; then kill "$health_pid" 2>/dev/null || true; fi
+	if [ -n "$app_pid" ]; then kill "$app_pid" 2>/dev/null || true; wait "$app_pid" 2>/dev/null || true; fi
+	exit 0
+}
+trap terminate INT TERM
+
+attempts=$(read_attempts)
+if [ -e "$RECOVERY_FLAG" ]; then enter_recovery forced; fi
+if [ "$attempts" -ge 3 ]; then enter_recovery watchdog; fi
+
+while :; do
+	application=$(find_application) || enter_recovery missing-application
+	rotate_log
+	if [ -f "$CRASH_DIR/core" ]; then mv -f "$CRASH_DIR/core" "$CRASH_DIR/core.previous"; fi
+	rm -f /run/crossink-healthy
+	printf '\n=== CrossInk start %s ===\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" >> "$APP_LOG"
+	(cd "$CRASH_DIR" && exec "$application") >> "$APP_LOG" 2>&1 &
+	app_pid=$!
+	(
+		sleep "$HEALTH_SECONDS"
+		if kill -0 "$app_pid" 2>/dev/null; then
+			: > /run/crossink-healthy
+			write_attempts 0
+		fi
+	) &
+	health_pid=$!
+	wait "$app_pid"
+	result=$?
+	kill "$health_pid" 2>/dev/null || true
+	wait "$health_pid" 2>/dev/null || true
+
+	if [ -e /run/crossink-healthy ]; then
+		attempts=0
+		if [ "$result" -eq 0 ]; then
+			# A deliberate clean exit is restarted without counting as a crash.
+			sleep 1
+			continue
+		fi
+	fi
+	attempts=$((attempts + 1))
+	write_attempts "$attempts"
+	logger -t crossink-supervisor "early exit rc=$result attempt=$attempts"
+	if [ "$attempts" -ge 3 ]; then enter_recovery watchdog; fi
+	sleep 2
+done
