@@ -61,6 +61,7 @@ std::array<char, 512> devInputCommand{};
 std::size_t devInputCommandLength = 0;
 std::optional<MappedInputManager::Button> pendingDevButtonRelease;
 std::uintptr_t applicationImageBase = 0;
+unsigned long nextTouchReconnectAt = 0;
 
 void stop(int /*signal*/) { running.store(false); }
 
@@ -515,7 +516,25 @@ void updateTouch() {
   if (processDevInput(context, screenWidth, screenHeight)) return;
   crossink::kobo::TouchFrame frame{};
   bool received = false;
-  while (touch.readFrame(frame)) {
+  while (true) {
+    const auto readResult = touch.readFrameDetailed(frame);
+    if (readResult == crossink::kobo::TouchReadResult::WouldBlock) break;
+    if (readResult == crossink::kobo::TouchReadResult::Interrupted) continue;
+    if (readResult == crossink::kobo::TouchReadResult::DeviceLost ||
+        readResult == crossink::kobo::TouchReadResult::ProtocolError) {
+      touch.close();
+      gestures.reset();
+      hasCapturedTouchTarget = false;
+      if (millis() >= nextTouchReconnectAt) {
+        crossink::kobo::TouchDeviceInfo discovered;
+        if (crossink::kobo::KoboEvdevTouch::discover(discovered) && touch.open(discovered)) {
+          touchDevice = std::move(discovered);
+          std::fprintf(stderr, "[KOBO] touch input reconnected\n");
+        }
+        nextTouchReconnectAt = millis() + 500;
+      }
+      break;
+    }
     received = true;
     gpio.markTouchActivity();
     lastTouchFrame = frame;

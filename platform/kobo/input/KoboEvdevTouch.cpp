@@ -171,20 +171,18 @@ void KoboEvdevTouch::close() {
 
 void KoboEvdevTouch::setOrientation(const ScreenOrientation orientation) { transform_.setOrientation(orientation); }
 
-bool KoboEvdevTouch::readFrame(TouchFrame& frame) {
-  if (fd_ < 0) {
-    return false;
-  }
-
+TouchReadResult KoboEvdevTouch::readFrameDetailed(TouchFrame& frame) {
+  if (fd_ < 0) return TouchReadResult::DeviceLost;
   KoboEvdevEvent event{};
   while (true) {
     const ssize_t count = ::read(fd_, &event, sizeof(event));
-    if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-      return false;
+    if (count < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) return TouchReadResult::WouldBlock;
+      if (errno == EINTR) return TouchReadResult::Interrupted;
+      return TouchReadResult::DeviceLost;
     }
-    if (count != static_cast<ssize_t>(sizeof(event))) {
-      return false;
-    }
+    if (count == 0) return TouchReadResult::DeviceLost;
+    if (count != static_cast<ssize_t>(sizeof(event))) return TouchReadResult::ProtocolError;
 
     if (event.type == EV_SYN && event.code == SYN_DROPPED) {
       down_ = false;
@@ -227,8 +225,17 @@ bool KoboEvdevTouch::readFrame(TouchFrame& frame) {
       }
       lastTimestampMicros_ = frame.timestampMicros;
       positionChanged_ = false;
-      return true;
+      return discontinuity ? TouchReadResult::Resynchronized : TouchReadResult::FrameReady;
     }
+  }
+}
+
+bool KoboEvdevTouch::readFrame(TouchFrame& frame) {
+  while (true) {
+    const TouchReadResult result = readFrameDetailed(frame);
+    if (result == TouchReadResult::FrameReady || result == TouchReadResult::Resynchronized) return true;
+    if (result == TouchReadResult::Interrupted) continue;
+    return false;
   }
 }
 

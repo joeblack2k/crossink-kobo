@@ -24,6 +24,15 @@ struct TouchFrame {
   bool discontinuity = false;
 };
 
+enum class TouchReadResult : std::uint8_t {
+  FrameReady,
+  WouldBlock,
+  Interrupted,
+  Resynchronized,
+  DeviceLost,
+  ProtocolError,
+};
+
 class KoboEvdevTouch {
  public:
   KoboEvdevTouch() = default;
@@ -38,7 +47,10 @@ class KoboEvdevTouch {
   void close();
   void setOrientation(ScreenOrientation orientation);
 
-  // Returns one complete evdev SYN_REPORT frame. EAGAIN is reported as false.
+  // The detailed result distinguishes an idle queue from device loss.
+  [[nodiscard]] TouchReadResult readFrameDetailed(TouchFrame& frame);
+
+  // Compatibility wrapper: returns true for a frame or discontinuity frame.
   [[nodiscard]] bool readFrame(TouchFrame& frame);
   [[nodiscard]] bool isOpen() const { return fd_ >= 0; }
   [[nodiscard]] const TouchDeviceInfo& device() const { return device_; }
