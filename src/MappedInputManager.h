@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 
+#include "BoundedFifo.h"
 class MappedInputManager {
  public:
   enum class Button { Back, Confirm, Left, Right, Up, Down, Power, PageBack, PageForward };
@@ -88,9 +89,7 @@ class MappedInputManager {
   std::array<bool, BUTTON_COUNT> injectedHeld{};
   std::array<unsigned long, BUTTON_COUNT> injectedPressStart{};
   static constexpr std::size_t TOUCH_TARGET_QUEUE_CAPACITY = 8;
-  std::array<TouchTarget, TOUCH_TARGET_QUEUE_CAPACITY> injectedTouchTargets{};
-  std::size_t injectedTouchTargetHead = 0;
-  std::size_t injectedTouchTargetCount = 0;
+  BoundedFifo<TouchTarget, TOUCH_TARGET_QUEUE_CAPACITY> injectedTouchTargets;
 #endif
 
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;

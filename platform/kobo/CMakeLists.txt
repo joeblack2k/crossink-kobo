@@ -202,6 +202,11 @@ if(BUILD_TESTING)
 	target_link_libraries(crossink-kobo-evdev-touch-test PRIVATE crossink_kobo_input)
 	add_test(NAME crossink-kobo-evdev-touch COMMAND crossink-kobo-evdev-touch-test)
 
+	add_executable(crossink-kobo-bounded-fifo-test tests/bounded-fifo-test.cpp)
+	target_include_directories(crossink-kobo-bounded-fifo-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+	target_compile_options(crossink-kobo-bounded-fifo-test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+	add_test(NAME crossink-kobo-bounded-fifo COMMAND crossink-kobo-bounded-fifo-test)
+
 	add_executable(crossink-kobo-sysfs-test tests/sysfs-test.cpp)
 	target_compile_options(crossink-kobo-sysfs-test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 	target_link_libraries(crossink-kobo-sysfs-test PRIVATE crossink_kobo_sysfs)
