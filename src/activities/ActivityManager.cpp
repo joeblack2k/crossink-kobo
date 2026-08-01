@@ -172,6 +172,9 @@ void ActivityManager::loop() {
         }
       } else if (pendingAction == PendingAction::Push) {
         // Move current activity to stack
+#ifdef KOBO_LINUX
+        TOUCH_UI.invalidate();
+#endif
         stackActivities.push_back(std::move(currentActivity));
         LOG_DBG("ACT", "Pushed to activity stack, new size = %zu", stackActivities.size());
       }
@@ -208,6 +211,9 @@ void ActivityManager::loop() {
 void ActivityManager::exitActivity(const RenderLock& lock) {
   // Note: lock must be held by the caller
   if (currentActivity) {
+#ifdef KOBO_LINUX
+    TOUCH_UI.invalidate();
+#endif
     currentActivity->onExit();
     currentActivity.reset();
   }
@@ -222,6 +228,9 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
     pendingAction = PendingAction::Replace;
   } else {
     // No current activity, safe to launch immediately
+#ifdef KOBO_LINUX
+    TOUCH_UI.invalidate();
+#endif
     currentActivity = std::move(newActivity);
     requestCleanRefreshForEntry(currentActivity.get());
     currentActivity->onEnter();

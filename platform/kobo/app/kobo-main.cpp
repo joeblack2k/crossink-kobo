@@ -44,6 +44,8 @@ crossink::kobo::KoboEvdevTouch touch;
 crossink::kobo::KoboTouchGesture gestures;
 crossink::kobo::TouchFrame lastTouchFrame{};
 bool haveTouchFrame = false;
+TouchUiRegistry::Resolution capturedTouchTarget{};
+bool hasCapturedTouchTarget = false;
 crossink::kobo::KoboFrontlightSysfs frontlight;
 int appliedFrontlight = -1;
 int appliedOrientation = -1;
@@ -150,6 +152,8 @@ MappedInputManager::Button mappedButton(const crossink::kobo::TouchAction action
   switch (action) {
     case Action::UiItem:
       break;
+    case Action::Cancelled:
+      break;
     case Action::Back:
       return MappedInputManager::Button::Back;
     case Action::Confirm:
@@ -173,14 +177,23 @@ MappedInputManager::Button mappedButton(const crossink::kobo::TouchAction action
 }
 
 void dispatch(const crossink::kobo::TouchDispatch event) {
-  if (event.action == crossink::kobo::TouchAction::None) return;
+  if (event.action == crossink::kobo::TouchAction::None ||
+      event.action == crossink::kobo::TouchAction::Cancelled) {
+    return;
+  }
 
+  const auto targetAction = event.action == crossink::kobo::TouchAction::UiItem ||
+                            event.action == crossink::kobo::TouchAction::Confirm ||
+                            event.action == crossink::kobo::TouchAction::Back;
   // A renderer-published hitbox is the authoritative action for the pixels
   // the user touched. In particular, Home places Settings in the left half
   // of the permanent bottom frame; the generic gesture mapper calls that
   // half Back. Resolve the visual target first so a visible button can never
   // be shadowed by the X4-compatible Back/Confirm fallback.
-  const auto visualTarget = TOUCH_UI.resolve(event.point.x, event.point.y);
+  const auto visualTarget =
+      targetAction && hasCapturedTouchTarget && capturedTouchTarget.generation == TOUCH_UI.generation()
+          ? capturedTouchTarget
+          : (targetAction ? TOUCH_UI.resolve(event.point.x, event.point.y) : TouchUiRegistry::Resolution{});
   if (visualTarget.found) {
     if (event.release) {
       std::fprintf(stderr, "[KOBO] touch resolve x=%d y=%d found=1 kind=%u current=%d target=%d count=%d\n",
@@ -192,18 +205,21 @@ void dispatch(const crossink::kobo::TouchDispatch event) {
                                                : visualTarget.secondaryTarget,
                                            visualTarget.generation, event.point.x, event.point.y);
     }
+    if (event.release) hasCapturedTouchTarget = false;
     return;
   }
 
   if (event.action == crossink::kobo::TouchAction::UiItem) {
     if (event.release) {
       std::fprintf(stderr, "[KOBO] touch resolve x=%d y=%d found=0\n", event.point.x, event.point.y);
+      hasCapturedTouchTarget = false;
     }
     return;
   }
   const auto button = mappedButton(event.action);
   if (event.press) mappedInputManager.injectPress(button);
   if (event.release) mappedInputManager.injectRelease(button);
+  if (event.release) hasCapturedTouchTarget = false;
 }
 
 bool initializeDevInput() {
@@ -470,7 +486,20 @@ void updateTouch() {
     received = true;
     lastTouchFrame = frame;
     haveTouchFrame = true;
-    dispatch(gestures.update(frame, context, screenWidth, screenHeight));
+    const bool startsTouch = frame.down && !gestures.isActive();
+    if (startsTouch) {
+      capturedTouchTarget = TOUCH_UI.resolve(frame.point.x, frame.point.y);
+      hasCapturedTouchTarget = capturedTouchTarget.found;
+    }
+    const auto event = gestures.update(frame, context, screenWidth, screenHeight);
+    if (event.action == crossink::kobo::TouchAction::Cancelled ||
+        event.action == crossink::kobo::TouchAction::Left || event.action == crossink::kobo::TouchAction::Right ||
+        event.action == crossink::kobo::TouchAction::Up || event.action == crossink::kobo::TouchAction::Down ||
+        event.action == crossink::kobo::TouchAction::PageBack ||
+        event.action == crossink::kobo::TouchAction::PageForward) {
+      hasCapturedTouchTarget = false;
+    }
+    dispatch(event);
   }
   if (!received && haveTouchFrame && lastTouchFrame.down) {
     lastTouchFrame.timestampMicros = monotonicMicros();
@@ -480,14 +509,36 @@ void updateTouch() {
 }
 
 void syncRefreshProfilePreference() {
-  const auto requested = SETTINGS.koboRefreshProfile == CrossPointSettings::KOBO_REFRESH_FAST
-                             ? crossink::kobo::RefreshProfile::Fast
-                             : crossink::kobo::RefreshProfile::Safe;
-  const bool qualified = crossink::kobo::koboFastRefreshQualified();
-  if (!display.setRefreshProfile(requested, qualified) && requested == crossink::kobo::RefreshProfile::Fast) {
+  // A prior present failure already forced the scheduler to Safe and issued a
+  // GC16 recovery. Clear the persisted preference before this loop can select
+  // a faster profile again or re-enable it after a reboot.
+  if (display.lastTelemetry().fallbackAttempted &&
+      SETTINGS.koboRefreshProfile != CrossPointSettings::KOBO_REFRESH_SAFE) {
     SETTINGS.koboRefreshProfile = CrossPointSettings::KOBO_REFRESH_SAFE;
     (void)SETTINGS.saveToFile();
-    std::fprintf(stderr, "[KOBO][EPD] rejected unqualified Fast profile; restored Safe\n");
+    std::fprintf(stderr, "[KOBO][EPD] display failure forced persisted profile to Safe\n");
+  }
+
+  crossink::kobo::RefreshProfile requested = crossink::kobo::RefreshProfile::Safe;
+  bool qualified = true;
+  switch (SETTINGS.koboRefreshProfile) {
+    case CrossPointSettings::KOBO_REFRESH_FAST:
+      requested = crossink::kobo::RefreshProfile::Fast;
+      qualified = crossink::kobo::koboFastRefreshQualified();
+      break;
+    case CrossPointSettings::KOBO_REFRESH_MAX_BETA:
+      requested = crossink::kobo::RefreshProfile::MaxBeta;
+      qualified = crossink::kobo::koboMaxBetaRefreshQualified();
+      break;
+    case CrossPointSettings::KOBO_REFRESH_SAFE:
+    default:
+      break;
+  }
+  if (!display.setRefreshProfile(requested, qualified) && requested != crossink::kobo::RefreshProfile::Safe) {
+    SETTINGS.koboRefreshProfile = CrossPointSettings::KOBO_REFRESH_SAFE;
+    (void)SETTINGS.saveToFile();
+    std::fprintf(stderr, "[KOBO][EPD] rejected unqualified %s profile; restored Safe\n",
+                 crossink::kobo::refreshProfileName(requested));
   }
 }
 }  // namespace
