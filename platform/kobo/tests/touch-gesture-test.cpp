@@ -68,8 +68,8 @@ int main() {
   expect(gesture.update(frame(450, 500, false, 100'000), TouchContext::Navigation, width, height), TouchAction::Right,
          true, true, "left swipe adjusts right");
 
-  expect(gesture.update(frame(900, 500, true, 1'000), TouchContext::Reader, width, height), TouchAction::PageForward, false,
-         false, "reader down must wait");
+  expect(gesture.update(frame(900, 500, true, 1'000), TouchContext::Reader, width, height), TouchAction::PageForward,
+         false, false, "reader down must wait");
   expect(gesture.update(frame(900, 500, false, 100'000), TouchContext::Reader, width, height), TouchAction::PageForward,
          true, true, "reader right zone");
 
