@@ -168,6 +168,7 @@ if(BUILD_TESTING)
 		"${CROSSINK_ROOT}/src"
 	)
 	target_compile_options(crossink-kobo-capabilities-test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+	target_link_libraries(crossink-kobo-capabilities-test PRIVATE crossink_kobo_hal_gpio)
 	add_test(NAME crossink-kobo-capabilities COMMAND crossink-kobo-capabilities-test)
 
 	add_executable(crossink-kobo-system-memory-test tests/system-memory-test.cpp)
@@ -232,4 +233,13 @@ if(BUILD_TESTING)
 	target_compile_options(crossink-kobo-render-scheduler-test PRIVATE -Wall -Wextra -Wpedantic -Werror)
 	target_link_libraries(crossink-kobo-render-scheduler-test PRIVATE pthread)
 	add_test(NAME crossink-kobo-render-scheduler COMMAND crossink-kobo-render-scheduler-test)
+
+	add_executable(crossink-kobo-opds-book-storage-test tests/opds-book-storage-test.cpp
+		"${CROSSINK_ROOT}/src/network/OpdsBookStorage.cpp"
+		"${CROSSINK_ROOT}/src/util/StringUtils.cpp"
+		"${CROSSINK_ROOT}/lib/Utf8/Utf8.cpp")
+	target_include_directories(crossink-kobo-opds-book-storage-test PRIVATE
+		"${CROSSINK_ROOT}/src" "${CROSSINK_ROOT}/lib/Utf8")
+	target_compile_options(crossink-kobo-opds-book-storage-test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+	add_test(NAME crossink-kobo-opds-book-storage COMMAND crossink-kobo-opds-book-storage-test)
 endif()

@@ -12,15 +12,30 @@
 #include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/OpdsCoverCache.h"
+#include "network/OpdsOfflineSync.h"
 
 namespace {
 // Editable fields: Name, URL, Username, Password, Filename.
-// Existing servers also show a Delete option (BASE_ITEMS + 1).
+// The primary server additionally exposes operational controls; other servers
+// remain simple configuration records.
 constexpr int BASE_ITEMS = 6;
+constexpr int PRIMARY_SYNC_ITEMS = 3;
+
+std::string transferStatusText(const OpdsOfflineSync::Status& status) {
+  std::string result = "Downloading " + std::to_string(status.completed) + "/" + std::to_string(status.total);
+  if (status.currentTotalBytes != 0) {
+    const size_t remaining =
+        status.currentTotalBytes > status.currentBytes ? status.currentTotalBytes - status.currentBytes : 0;
+    result += " — " + std::to_string(remaining / 1024) + " KiB left";
+  }
+  return result;
+}
 }  // namespace
 
 int OpdsSettingsActivity::getMenuItemCount() const {
-  return isNewServer ? BASE_ITEMS : BASE_ITEMS + 1;  // +1 for Delete
+  const bool isPrimary = !isNewServer && serverIndex == 0;
+  return BASE_ITEMS + (isPrimary ? PRIMARY_SYNC_ITEMS : 0) + (isNewServer ? 0 : 1);
 }
 
 void OpdsSettingsActivity::onEnter() {
@@ -168,8 +183,23 @@ void OpdsSettingsActivity::handleSelection() {
   } else if (selectedIndex == 5) {
     editServer.syncAllBooks = !editServer.syncAllBooks;
     saveServer();
+    if (editServer.syncAllBooks) OPDS_OFFLINE_SYNC.requestCatalogRefresh();
     requestUpdate();
-  } else if (selectedIndex == 6 && !isNewServer) {
+  } else if (!isNewServer && serverIndex == 0 && selectedIndex == 6) {
+    const auto status = OPDS_OFFLINE_SYNC.status();
+    if (status.phase == OpdsOfflineSync::Phase::Paused) {
+      OPDS_OFFLINE_SYNC.resume();
+    } else {
+      OPDS_OFFLINE_SYNC.pause();
+    }
+    requestUpdate();
+  } else if (!isNewServer && serverIndex == 0 && selectedIndex == 7) {
+    OPDS_OFFLINE_SYNC.cancel();
+    requestUpdate();
+  } else if (!isNewServer && serverIndex == 0 && selectedIndex == 8) {
+    OPDS_COVER_CACHE.retryFailedForServer(editServer.id);
+    requestUpdate();
+  } else if (selectedIndex == getMenuItemCount() - 1 && !isNewServer) {
     // Delete flow is only available for existing servers.
     if (!OPDS_STORE.removeServer(static_cast<size_t>(serverIndex))) {
       LOG_ERR("OPS", "Failed to remove OPDS server at index %d", serverIndex);
@@ -207,7 +237,10 @@ void OpdsSettingsActivity::render(RenderLock&&) {
         if (index < 5) {
           return std::string(I18N.get(fieldNames[index]));
         }
-        if (index == 5) return std::string("Sync all books offline");
+        if (index == 5) return std::string("Sync all books for offline use");
+        if (!isNewServer && serverIndex == 0 && index == 6) return std::string("Pause background sync");
+        if (!isNewServer && serverIndex == 0 && index == 7) return std::string("Cancel background sync");
+        if (!isNewServer && serverIndex == 0 && index == 8) return std::string("Retry failed cover downloads");
         return std::string(tr(STR_DELETE_SERVER));
       },
       nullptr, nullptr,
@@ -223,7 +256,24 @@ void OpdsSettingsActivity::render(RenderLock&&) {
         } else if (index == 4) {
           return editServer.filenameFormat == OpdsFilenameFormat::TITLE_AUTHOR ? std::string(tr(STR_TITLE_AUTHOR))
                                                                                : std::string(tr(STR_AUTHOR_TITLE));
-        } else if (index == 5) return editServer.syncAllBooks ? std::string("On") : std::string("Off");
+        } else if (index == 5) {
+          return editServer.syncAllBooks ? std::string("On") : std::string("Off");
+        } else if (!isNewServer && serverIndex == 0 && index == 6) {
+          const auto status = OPDS_OFFLINE_SYNC.status();
+          if (status.phase == OpdsOfflineSync::Phase::Paused) return std::string("Paused — tap to resume");
+          if (status.phase == OpdsOfflineSync::Phase::Downloading) return transferStatusText(status);
+          if (status.phase == OpdsOfflineSync::Phase::SyncingMetadata) return std::string("Syncing catalog");
+          if (status.phase == OpdsOfflineSync::Phase::Failed) {
+            return status.lastError.empty() ? std::string("Failed") : status.lastError;
+          }
+          if (status.phase == OpdsOfflineSync::Phase::Offline) return std::string("Offline — cached catalog");
+          if (status.lastSuccessMs != 0) return std::string("Catalog synced");
+          return std::string("Idle");
+        } else if (!isNewServer && serverIndex == 0 && index == 7) {
+          return std::string("Stop remaining downloads");
+        } else if (!isNewServer && serverIndex == 0 && index == 8) {
+          return std::string("Retry covers with a backoff error");
+        }
         return std::string("");
       },
       true);

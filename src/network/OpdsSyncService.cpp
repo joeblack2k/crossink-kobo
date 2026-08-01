@@ -1,17 +1,18 @@
 #include "OpdsSyncService.h"
 
+#include <Epub.h>
+#include <FsHelpers.h>
+#include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <OpdsStream.h>
-#include <JpegToBmpConverter.h>
 #include <PngToBmpConverter.h>
-#include <Epub.h>
-#include <FsHelpers.h>
 #include <Xtc.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -33,6 +34,8 @@ struct OpdsSyncService::Job {
   std::string url;
   std::string destinationPath;
   std::string sourcePath;
+  bool catalogOnly = false;
+  bool resumePartial = false;
 };
 
 namespace {
@@ -64,9 +67,17 @@ OpdsSyncService::ResultCode downloadCode(const HttpDownloader::DownloadError val
 
 enum class CoverFormat : uint8_t { Unsupported, Jpeg, Png };
 
+constexpr uint64_t kMaximumCoverSourceBytes = 16ULL * 1024ULL * 1024ULL;
+
 CoverFormat coverFormatForPath(const std::string& path) {
   FsFile input;
   if (!Storage.openFileForRead("OPDSCOV", path, input)) return CoverFormat::Unsupported;
+  const uint64_t size = input.size();
+  if (size == 0 || size > kMaximumCoverSourceBytes) {
+    LOG_ERR("OPDSCOV", "Rejected cover source size: %llu", static_cast<unsigned long long>(size));
+    input.close();
+    return CoverFormat::Unsupported;
+  }
   std::array<uint8_t, 8> header{};
   const int read = input.read(header.data(), header.size());
   input.close();
@@ -79,7 +90,7 @@ CoverFormat coverFormatForPath(const std::string& path) {
 bool convertCoverToBmp(const std::string& sourcePath, const std::string& destinationPath, std::string& detail) {
   const CoverFormat format = coverFormatForPath(sourcePath);
   if (format == CoverFormat::Unsupported) {
-    detail = "unsupported cover media";
+    detail = "unsupported or oversized cover media";
     return false;
   }
   const std::string temporaryPath = destinationPath + ".part";
@@ -96,11 +107,10 @@ bool convertCoverToBmp(const std::string& sourcePath, const std::string& destina
   }
   constexpr int kCoverWidth = 300;
   constexpr int kCoverHeight = 450;
-  const bool converted = format == CoverFormat::Jpeg
-                             ? JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(input, output, kCoverWidth,
-                                                                                     kCoverHeight, true)
-                             : PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(input, output, kCoverWidth,
-                                                                                   kCoverHeight, true);
+  const bool converted =
+      format == CoverFormat::Jpeg
+          ? JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(input, output, kCoverWidth, kCoverHeight, true)
+          : PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(input, output, kCoverWidth, kCoverHeight, true);
   const bool durable = converted && output.sync();
   input.close();
   output.close();
@@ -145,8 +155,10 @@ OpdsSyncService::~OpdsSyncService() {
   impl = nullptr;
 }
 
-uint64_t OpdsSyncService::enqueueCatalogRefresh(const OpdsServer& server, std::string url) {
-  return enqueue(Job{0, JobKind::CatalogRefresh, server, std::move(url), {}, {}});
+uint64_t OpdsSyncService::enqueueCatalogRefresh(const OpdsServer& server, std::string url, const bool catalogOnly) {
+  Job job{0, JobKind::CatalogRefresh, server, std::move(url), {}, {}};
+  job.catalogOnly = catalogOnly;
+  return enqueue(std::move(job));
 }
 
 uint64_t OpdsSyncService::enqueueBookDownload(const OpdsServer& server, std::string url, std::string destinationPath) {
@@ -154,8 +166,10 @@ uint64_t OpdsSyncService::enqueueBookDownload(const OpdsServer& server, std::str
 }
 
 uint64_t OpdsSyncService::enqueueBulkBookDownload(const OpdsServer& server, std::string url,
-                                                   std::string destinationPath) {
-  return enqueue(Job{0, JobKind::BulkBookDownload, server, std::move(url), std::move(destinationPath), {}});
+                                                  std::string destinationPath, const bool resumePartial) {
+  Job job{0, JobKind::BulkBookDownload, server, std::move(url), std::move(destinationPath), {}};
+  job.resumePartial = resumePartial;
+  return enqueue(std::move(job));
 }
 
 uint64_t OpdsSyncService::enqueueCoverFetch(const OpdsServer& server, std::string url, std::string destinationPath) {
@@ -182,9 +196,11 @@ uint64_t OpdsSyncService::enqueueReconcile() { return enqueue(Job{0, JobKind::Re
 uint64_t OpdsSyncService::enqueue(Job job) {
   if (!impl) return 0;
   auto& state = stateFor(impl);
+  uint64_t id = 0;
   {
     std::lock_guard lock(state.mutex);
     job.id = state.nextId++;
+    id = job.id;
 #if defined(KOBO_LINUX)
     const bool lowPriority = job.kind == JobKind::CoverFetch || job.kind == JobKind::CoverConvert ||
                              job.kind == JobKind::LocalCover || job.kind == JobKind::BulkBookDownload;
@@ -206,7 +222,7 @@ uint64_t OpdsSyncService::enqueue(Job job) {
   // enables the pthread worker, which keeps this shared class source portable.
   execute(std::move(job));
 #endif
-  return job.id;
+  return id;
 }
 
 bool OpdsSyncService::takeResult(const uint64_t id, Result& result) {
@@ -300,6 +316,7 @@ void OpdsSyncService::execute(Job job) {
     std::string url = job.url;
     std::vector<std::string> visited;
     constexpr size_t kMaximumPages = 32;
+    bool followedCatalogRoot = false;
     for (size_t page = 0; page < kMaximumPages && !url.empty(); ++page) {
       if (std::find(visited.begin(), visited.end(), url) != visited.end()) {
         result.code = ResultCode::ParseFailed;
@@ -323,6 +340,21 @@ void OpdsSyncService::execute(Job job) {
         break;
       }
       const size_t count = parser.getEntryCount();
+      if (job.catalogOnly && !followedCatalogRoot) {
+        const auto allBooks = std::find_if(entries.get(), entries.get() + count, [](const OpdsEntry& entry) {
+          if (entry.type != OpdsEntryType::NAVIGATION) return false;
+          std::string title = entry.title;
+          std::transform(title.begin(), title.end(), title.begin(),
+                         [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
+          return title == "all books";
+        });
+        if (allBooks != entries.get() + count) {
+          url = allBooks->href.rfind("http", 0) == 0 ? allBooks->href : UrlUtils::buildUrl(url, allBooks->href);
+          followedCatalogRoot = true;
+          continue;
+        }
+        followedCatalogRoot = true;
+      }
       if (page == 0) {
         result.entries.assign(entries.get(), entries.get() + count);
         result.searchTemplate = parser.getSearchTemplate();
@@ -344,6 +376,10 @@ void OpdsSyncService::execute(Job job) {
              job.kind == JobKind::CoverFetch) {
     bool cancelledFlag = false;
     HttpDownloader::DownloadOptions options;
+    if (job.kind == JobKind::BulkBookDownload && job.resumePartial) {
+      options.preservePartial = true;
+      options.resumePartial = true;
+    }
     options.shouldCancel = [&] { return cancelled(); };
     options.bufferSize = 2048;
     const auto status = HttpDownloader::downloadToFile(
@@ -360,10 +396,10 @@ void OpdsSyncService::execute(Job job) {
         &cancelledFlag, job.server.username, job.server.password, options);
     result.code = downloadCode(status);
   } else if (job.kind == JobKind::CoverConvert) {
-    result.code = cancelled() ? ResultCode::Cancelled
-                              : (convertCoverToBmp(job.sourcePath, job.destinationPath, result.detail)
-                                     ? ResultCode::Ok
-                                     : ResultCode::FileFailed);
+    result.code =
+        cancelled() ? ResultCode::Cancelled
+                    : (convertCoverToBmp(job.sourcePath, job.destinationPath, result.detail) ? ResultCode::Ok
+                                                                                             : ResultCode::FileFailed);
   } else if (job.kind == JobKind::LocalCover) {
     bool generated = false;
     if (FsHelpers::hasEpubExtension(job.sourcePath)) {
@@ -388,7 +424,14 @@ void OpdsSyncService::execute(Job job) {
     std::lock_guard lock(state.mutex);
     if (state.progress.id == job.id) state.progress.running = false;
     if (state.cancelledId == job.id) state.cancelledId = 0;
+    // Every submitted job has exactly one owner that waits for this result.
+    // Dropping a completed result here strands that owner forever in
+    // Downloading/Queued state. This was visible with a 55-book catalog: the
+    // worker completed cover jobs faster than the app thread could consume
+    // them, and the old 16-result cap silently lost the early completions.
+    // The Kobo worker is single-flight and owners drain on every app loop, so
+    // retaining results is bounded by the submitted work rather than by a
+    // render-frame race.
     state.completed.push_back(std::move(result));
-    if (state.completed.size() > 16) state.completed.pop_front();
   }
 }

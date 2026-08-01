@@ -5,6 +5,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -17,6 +18,19 @@ constexpr const char* kWakeupCount = "/sys/power/wakeup_count";
 constexpr const char* kEventDirectory = "/data/.crossink/power";
 constexpr const char* kEventFile = "/data/.crossink/power/suspend-events.jsonl";
 constexpr std::size_t kEventLimitBytes = 64 * 1024;
+// The RN5T618 adapter, USB and battery supplies are useful while the reader
+// runs, but they must not be suspend wake sources.  On the N437 their pending
+// power-good notifications wake `mem` immediately whenever a cable is
+// attached, making the visible sleep screen look like a failed suspend.  The
+// physical gpio-keys power button deliberately remains enabled.
+constexpr std::array<const char*, 3> kAuxiliaryWakeupPaths = {
+    "/sys/devices/platform/soc/2100000.bus/21a8000.i2c/i2c-2/2-0032/rn5t618-power/"
+    "power_supply/rn5t618-battery/power/wakeup",
+    "/sys/devices/platform/soc/2100000.bus/21a8000.i2c/i2c-2/2-0032/rn5t618-power/"
+    "power_supply/rn5t618-adp/power/wakeup",
+    "/sys/devices/platform/soc/2100000.bus/21a8000.i2c/i2c-2/2-0032/rn5t618-power/"
+    "power_supply/rn5t618-usb/power/wakeup",
+};
 
 std::uint64_t monotonicMilliseconds() {
   timespec now{};
@@ -79,6 +93,37 @@ bool containsState(const std::string& states, const char* state) {
   }
   return false;
 }
+
+class AuxiliaryWakeupMask {
+ public:
+  // Keep the original state and restore it on every exit path.  This avoids
+  // changing normal charging/battery behaviour after a wake or a failed
+  // suspend attempt.
+  std::size_t disableForSuspend() {
+    for (std::size_t index = 0; index < kAuxiliaryWakeupPaths.size(); ++index) {
+      std::string current;
+      if (!readText(kAuxiliaryWakeupPaths[index], current) || current != "enabled") continue;
+      original_[index] = std::move(current);
+      if (writeText(kAuxiliaryWakeupPaths[index], "disabled", std::strlen("disabled"))) {
+        changed_[index] = true;
+        ++disabledCount_;
+      }
+    }
+    return disabledCount_;
+  }
+
+  ~AuxiliaryWakeupMask() {
+    for (std::size_t index = 0; index < kAuxiliaryWakeupPaths.size(); ++index) {
+      if (!changed_[index]) continue;
+      (void)writeText(kAuxiliaryWakeupPaths[index], original_[index].c_str(), original_[index].size());
+    }
+  }
+
+ private:
+  std::array<std::string, kAuxiliaryWakeupPaths.size()> original_{};
+  std::array<bool, kAuxiliaryWakeupPaths.size()> changed_{};
+  std::size_t disabledCount_ = 0;
+};
 }  // namespace
 
 KoboSuspendProbe KoboSuspendController::probe() {
@@ -100,9 +145,9 @@ void KoboSuspendController::recordEvent(const char* state, const std::string& de
   const int fd = ::open(kEventFile, O_CREAT | O_APPEND | O_WRONLY | O_CLOEXEC, 0644);
   if (fd < 0) return;
   const std::string line = "{\"state\":\"" + escapeJson(state ? state : "unknown") +
-                           "\",\"monotonic_ms\":" + std::to_string(monotonicMilliseconds()) +
-                           ",\"boot_id\":\"" + escapeJson(current.bootId) + "\",\"uptime\":\"" +
-                           escapeJson(current.uptime) + "\",\"detail\":\"" + escapeJson(detail) + "\"}\n";
+                           "\",\"monotonic_ms\":" + std::to_string(monotonicMilliseconds()) + ",\"boot_id\":\"" +
+                           escapeJson(current.bootId) + "\",\"uptime\":\"" + escapeJson(current.uptime) +
+                           "\",\"detail\":\"" + escapeJson(detail) + "\"}\n";
   (void)::write(fd, line.data(), line.size());
   (void)::fsync(fd);
   ::close(fd);
@@ -117,7 +162,10 @@ KoboSuspendResult KoboSuspendController::suspendToRam(const KoboSuspendRequest& 
     recordEvent("rejected", result.detail);
     return result;
   }
-  recordEvent("suspending", request.eventContext);
+  AuxiliaryWakeupMask auxiliaryWakeupMask;
+  const std::size_t maskedWakeupSources = auxiliaryWakeupMask.disableForSuspend();
+  const std::string suspendContext = request.eventContext + "; aux_wake_masked=" + std::to_string(maskedWakeupSources);
+  recordEvent("suspending", suspendContext);
   std::string wakeupCount;
   if (capabilities.wakeupCountSupported) {
     if (!readText(kWakeupCount, wakeupCount) || wakeupCount.empty()) {

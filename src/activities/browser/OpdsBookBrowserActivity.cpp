@@ -19,20 +19,15 @@
 #include "components/DirectListTouch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/OpdsBookStorage.h"
+#include "network/OpdsEpubValidator.h"
+#include "network/OpdsOfflineSync.h"
 #include "network/OpdsSyncService.h"
 #include "util/BookCacheUtils.h"
-#include "util/StringUtils.h"
 #include "util/UrlUtils.h"
 
 namespace {
 constexpr size_t OPDS_BROWSER_ENTRY_CAPACITY = MAX_OPDS_FEED_ENTRIES + 2;
-
-std::string buildBookFilenameBase(const OpdsEntry& book, const OpdsFilenameFormat format) {
-  if (book.author.empty()) return book.title;
-  if (book.title.empty()) return book.author;
-  if (format == OpdsFilenameFormat::TITLE_AUTHOR) return book.title + " - " + book.author;
-  return book.author + " - " + book.title;
-}
 }  // namespace
 
 void OpdsBookBrowserActivity::onEnter() {
@@ -120,10 +115,6 @@ void OpdsBookBrowserActivity::loop() {
   }
 
   if (state == BrowserState::BROWSING) {
-    if (bulkRunning) {
-      downloadNextBulkBook();
-      return;
-    }
     // The original X3/X4 browser only moved a focus cursor through tiny,
     // fixed-height text rows.  Kobo renders this activity as a normal list,
     // publishes each visible row and activates the exact touched entry.
@@ -303,7 +294,10 @@ void OpdsBookBrowserActivity::applyFeedResult(OpdsSyncService::Result&& result) 
   if (!OPDS_CATALOG.replaceServerSnapshot(server.id, snapshot)) {
     LOG_ERR("OPDS", "Could not persist OPDS catalog metadata");
   }
-  startBulkSyncIfEnabled();
+  // The Library owns the catalog, and the global coordinator owns optional
+  // Sync All. The browser must never turn a foreground navigation activity
+  // into a sequential bulk-download loop.
+  if (server.syncAllBooks) OPDS_OFFLINE_SYNC.startPrimaryIfEnabled();
   if (autoOpenCatalog && currentPath.empty()) {
     const auto allBooks = std::find_if(entries.get(), entries.get() + entryCount, [](const OpdsEntry& entry) {
       if (entry.type != OpdsEntryType::NAVIGATION) return false;
@@ -317,9 +311,8 @@ void OpdsBookBrowserActivity::applyFeedResult(OpdsSyncService::Result&& result) 
       return;
     }
   }
-  if (autoOpenCatalog && !bulkRunning &&
-      std::any_of(entries.get(), entries.get() + entryCount,
-                  [](const OpdsEntry& entry) { return entry.type == OpdsEntryType::BOOK; })) {
+  if (autoOpenCatalog && std::any_of(entries.get(), entries.get() + entryCount,
+                                     [](const OpdsEntry& entry) { return entry.type == OpdsEntryType::BOOK; })) {
     autoOpenCatalog = false;
     activityManager.goToLibrary();
     return;
@@ -426,12 +419,14 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
     return;
   }
   const std::string filename =
-      directory + "/" + StringUtils::sanitizeFilename(buildBookFilenameBase(book, server.filenameFormat)) + ".epub";
+      OpdsBookStorage::downloadPath(server.id, server.filenameFormat == OpdsFilenameFormat::TITLE_AUTHOR,
+                                    OpdsCatalogStore::stableBookId(book), book.title, book.author);
   LOG_DBG("OPDS", "Queueing book download");
   OPDS_CATALOG.markAvailability(server.id, book, OpdsCatalogAvailability::Downloading, filename);
   activeDownloadBook = book;
   activeDownloadPath = filename;
-  activeJobId = OPDS_SYNC.enqueueBookDownload(server, downloadUrl, filename);
+  activeDownloadTemporaryPath = filename + ".part";
+  activeJobId = OPDS_SYNC.enqueueBookDownload(server, downloadUrl, activeDownloadTemporaryPath);
   if (activeJobId == 0) {
     OPDS_CATALOG.markAvailability(server.id, book, OpdsCatalogAvailability::DownloadFailed);
     activeDownloadBook.reset();
@@ -452,8 +447,20 @@ void OpdsBookBrowserActivity::applyDownloadResult(OpdsSyncService::Result&& resu
   const OpdsEntry book = std::move(*activeDownloadBook);
   activeDownloadBook.reset();
   const std::string filename = activeDownloadPath;
+  const std::string temporaryFilename = activeDownloadTemporaryPath;
   activeDownloadPath.clear();
+  activeDownloadTemporaryPath.clear();
   if (result.code == OpdsSyncService::ResultCode::Ok) {
+    std::string validationDetail;
+    if (!validateOpdsEpubArchive(temporaryFilename, validationDetail) ||
+        !Storage.rename(temporaryFilename.c_str(), filename.c_str())) {
+      LOG_ERR("OPDS", "Downloaded EPUB publish failed: %s", validationDetail.c_str());
+      OPDS_CATALOG.markAvailability(server.id, book, OpdsCatalogAvailability::DownloadFailed);
+      state = BrowserState::ERROR;
+      errorMessage = tr(STR_DOWNLOAD_FAILED);
+      requestUpdate();
+      return;
+    }
     clearBookCache(filename);
     OPDS_CATALOG.markAvailability(server.id, book, OpdsCatalogAvailability::AvailableOffline, filename);
     if (directDownload) {
@@ -466,44 +473,12 @@ void OpdsBookBrowserActivity::applyDownloadResult(OpdsSyncService::Result&& resu
     mappedInput.suppressNextBackRelease();
     OPDS_CATALOG.markAvailability(server.id, book, OpdsCatalogAvailability::RemoteOnly);
     state = BrowserState::BROWSING;
-    bulkRunning = false;
   } else {
     OPDS_CATALOG.markAvailability(server.id, book, OpdsCatalogAvailability::DownloadFailed);
-    if (bulkRunning) {
-      // A single unavailable title must not block the rest of an offline sync.
-      state = BrowserState::BROWSING;
-    } else {
-      state = BrowserState::ERROR;
-      errorMessage = tr(STR_DOWNLOAD_FAILED);
-    }
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_DOWNLOAD_FAILED);
   }
-  if (bulkRunning) ++bulkIndex;
   requestUpdate();
-}
-
-void OpdsBookBrowserActivity::startBulkSyncIfEnabled() {
-  if (!server.syncAllBooks || bulkRunning) return;
-  bulkQueue.clear();
-  for (size_t i = 0; i < entryCount; ++i) {
-    const auto& entry = entries[i];
-    if (entry.type != OpdsEntryType::BOOK) continue;
-    const auto* cached = OPDS_CATALOG.find(server.id, OpdsCatalogStore::stableBookId(entry));
-    if (!cached || cached->availability != OpdsCatalogAvailability::AvailableOffline) bulkQueue.push_back(entry);
-  }
-  bulkIndex = 0;
-  bulkRunning = !bulkQueue.empty();
-  if (bulkRunning) LOG_INF("OPDS", "Bulk offline sync queued: %zu books", bulkQueue.size());
-}
-
-void OpdsBookBrowserActivity::downloadNextBulkBook() {
-  if (bulkIndex >= bulkQueue.size()) {
-    bulkRunning = false;
-    LOG_INF("OPDS", "Bulk offline sync complete");
-    requestUpdate();
-    return;
-  }
-  statusMessage = std::string("Sync ") + std::to_string(bulkIndex + 1) + "/" + std::to_string(bulkQueue.size());
-  downloadBook(bulkQueue[bulkIndex]);
 }
 
 void OpdsBookBrowserActivity::launchSearch() {

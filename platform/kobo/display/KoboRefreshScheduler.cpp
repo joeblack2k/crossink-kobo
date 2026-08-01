@@ -125,10 +125,11 @@ RefreshFallback KoboRefreshScheduler::recordFailure(const int errorNumber, const
                                                     const bool qualityExceeded) {
   RefreshFallback fallback{};
   fallback.from = profile_;
-  // MaxBeta must degrade one level at a time.  Fast is deliberately never
-  // retried automatically: the caller still has to pass its device-specific
-  // qualification after the bounded cooldown.
-  fallback.to = profile_ == RefreshProfile::MaxBeta ? RefreshProfile::Fast : RefreshProfile::Safe;
+  // A failed display submission is never retried at a faster profile. The
+  // immediate recovery must be the proven Safe plan plus a GC16 full refresh;
+  // a persisted preference is cleared by the application loop before it can
+  // re-select Fast or Max beta on the next frame.
+  fallback.to = RefreshProfile::Safe;
   fallback.activated = true;
   fallback.requiresRecoveryFull = true;
   fallback.reason = qualityExceeded    ? "quality"

@@ -46,6 +46,7 @@
 #include "WordRef.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "clippings/ClippingsManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -84,6 +85,39 @@ constexpr int PUBLISHER_PAGE_NUMBER_X = 5;
 // Building a large next chapter may take several seconds on the N437.  Wait
 // for an actual reading pause rather than competing with ordinary page turns.
 constexpr unsigned long NEXT_SPINE_PRELOAD_IDLE_MS = 15000UL;
+
+std::string canonicalSearchText(const std::string& source) {
+  std::string result;
+  result.reserve(source.size());
+  bool pendingSpace = false;
+  for (const unsigned char ch : source) {
+    if (std::isalnum(ch) || ch >= 0x80) {
+      if (pendingSpace && !result.empty()) result.push_back(' ');
+      result.push_back(static_cast<char>(std::tolower(ch)));
+      pendingSpace = false;
+    } else {
+      pendingSpace = true;
+    }
+  }
+  return result;
+}
+
+std::string pageSearchText(const Page& page) {
+  std::string text;
+  for (const auto& element : page.elements) {
+    if (element->getTag() != TAG_PageLine) continue;
+    const auto& line = static_cast<const PageLine&>(*element);
+    if (!line.getBlock()) continue;
+    const auto& block = *line.getBlock();
+    for (uint16_t word = 0; word < block.wordCount(); ++word) {
+      const char* value = block.wordText(word);
+      if (value == nullptr || value[0] == '\0') continue;
+      if (!text.empty()) text.push_back(' ');
+      text += value;
+    }
+  }
+  return canonicalSearchText(text);
+}
 
 uint32_t pagesCentipages(const float pages) {
   if (pages <= 0.0f) {
@@ -2471,32 +2505,40 @@ void EpubReaderActivity::handleClippingJump(const ClippingJumpResult& clipping) 
 
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
   switch (action) {
-    case EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER: {
-      const int spineIdx = currentSpineIndex;
-      const std::string path = epub->getPath();
-      pauseReadingPaceTimer("chapter_selection");
+    case EpubReaderMenuActivity::MenuAction::SEARCH_BY_LINE: {
+      pauseReadingPaceTimer("line_search_input");
       startActivityForResult(
-          std::make_unique<EpubReaderChapterSelectionActivity>(renderer, mappedInput, epub, path, spineIdx),
+          std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, "Search by line", "", 160, InputType::Text, 3),
           [this](const ActivityResult& result) {
-            if (!result.isCancelled) {
-              const auto& chapterResult = std::get<ChapterResult>(result.data);
-              RenderLock lock(*this);
-
-              clearFootnotePreviewState();
-              currentSpineIndex = chapterResult.spineIndex;
-
-              // If anchor is not empty, it will be used later to calculate the page number.
-              pendingAnchor = chapterResult.anchor;
-
-              // Otherwise page 0 will be used.
-              nextPageNumber = 0;
-
-              section.reset();
-              armReadingPaceWarmup("chapter_jump");
-              pauseReadingPaceTimer("chapter_jump");
-            } else {
-              resumeReadingPaceTimer("chapter_selection_cancel");
+            if (result.isCancelled) {
+              resumeReadingPaceTimer("line_search_cancel");
+              requestUpdate();
+              return;
             }
+            const auto* keyboard = std::get_if<KeyboardResult>(&result.data);
+            if (keyboard == nullptr || keyboard->text.empty()) {
+              resumeReadingPaceTimer("line_search_empty");
+              requestUpdate();
+              return;
+            }
+
+            int matchedSpine = -1;
+            int matchedPage = -1;
+            if (findLineInBook(keyboard->text, matchedSpine, matchedPage)) {
+              RenderLock lock(*this);
+              clearFootnotePreviewState();
+              currentSpineIndex = matchedSpine;
+              nextPageNumber = matchedPage;
+              pendingAnchor.clear();
+              section.reset();
+              armReadingPaceWarmup("line_search_jump");
+              LOG_INF("LSEARCH", "Matched line at spine=%d page=%d", matchedSpine, matchedPage);
+            } else {
+              LOG_INF("LSEARCH", "No exact normalized line match");
+              drawToast(renderer, "Line not found");
+            }
+            resumeReadingPaceTimer("line_search_complete");
+            requestUpdate();
           });
       break;
     }
@@ -2962,7 +3004,8 @@ void EpubReaderActivity::maybePreindexNextSpine() {
   const int fontId = SETTINGS.getReaderFontId();
   const EpubRenderMode renderMode = normalizeRenderMode(SETTINGS.epubRenderMode);
   const SectionBuildProfile profile = buildProfileForRenderMode(renderMode);
-  auto preload = makeUniqueNoThrow<Section>(epub, targetSpine, renderer, sectionCacheSuffixForRenderMode(profile.renderMode));
+  auto preload =
+      makeUniqueNoThrow<Section>(epub, targetSpine, renderer, sectionCacheSuffixForRenderMode(profile.renderMode));
   if (!preload) {
     LOG_DBG("PRE", "Skipping next-chapter pre-index: allocation failed for spine %d", targetSpine);
     return;
@@ -2988,6 +3031,71 @@ void EpubReaderActivity::maybePreindexNextSpine() {
     LOG_DBG("PRE", "Idle pre-index skipped/failed: spine=%d low_memory=%d", targetSpine, lowMemoryAbort ? 1 : 0);
   }
 #endif
+}
+
+bool EpubReaderActivity::findLineInBook(const std::string& query, int& matchedSpine, int& matchedPage) {
+  matchedSpine = -1;
+  matchedPage = -1;
+  if (!epub) return false;
+
+  const std::string needle = canonicalSearchText(query);
+  if (needle.empty()) return false;
+
+  const ReaderViewportLayout layout = computeReaderViewportLayout(renderer, automaticPageTurnActive);
+  const int fontId = SETTINGS.getReaderFontId();
+  const EpubRenderMode renderMode = normalizeRenderMode(SETTINGS.epubRenderMode);
+  const SectionBuildProfile profile = buildProfileForRenderMode(renderMode);
+  const int activeSpine = currentSpineIndex;
+  const int activePage = section ? section->currentPage : nextPageNumber;
+
+  // Scan in book order.  Cached sections are read directly; a missing section
+  // is indexed once with the active reader layout, then remains an SD cache.
+  for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
+    Section* candidate = nullptr;
+    std::unique_ptr<Section> owned;
+    if (spine == activeSpine && section) {
+      candidate = section.get();
+    } else {
+      owned = makeUniqueNoThrow<Section>(epub, spine, renderer, sectionCacheSuffixForRenderMode(profile.renderMode));
+      if (!owned) {
+        LOG_ERR("LSEARCH", "Skipping spine=%d: allocation failed", spine);
+        continue;
+      }
+      if (!owned->loadSectionFile(fontId, SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+                                  SETTINGS.forceParagraphIndents, SETTINGS.paragraphAlignment, layout.viewportWidth,
+                                  layout.viewportHeight, SETTINGS.hyphenationEnabled, profile.embeddedStyle,
+                                  SETTINGS.imageRendering, profile.bionicReadingEnabled, profile.guideReadingEnabled,
+                                  profile.renderMode)) {
+        bool lowMemoryAbort = false;
+        if (!owned->createSectionFile(
+                fontId, SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+                SETTINGS.forceParagraphIndents, SETTINGS.paragraphAlignment, layout.viewportWidth,
+                layout.viewportHeight, SETTINGS.hyphenationEnabled, profile.embeddedStyle, SETTINGS.imageRendering,
+                profile.bionicReadingEnabled, profile.guideReadingEnabled, []() {}, nullptr, &lowMemoryAbort,
+                profile.renderMode)) {
+          LOG_DBG("LSEARCH", "Skipping spine=%d: cache build failed low_memory=%d", spine, lowMemoryAbort ? 1 : 0);
+          continue;
+        }
+      }
+      candidate = owned.get();
+    }
+
+    const int originalPage = candidate->currentPage;
+    for (int page = 0; page < candidate->pageCount; ++page) {
+      candidate->currentPage = page;
+      const auto rendered = candidate->loadPageFromSectionFile();
+      if (rendered && pageSearchText(*rendered).find(needle) != std::string::npos) {
+        candidate->currentPage = originalPage;
+        matchedSpine = spine;
+        matchedPage = page;
+        return true;
+      }
+    }
+    candidate->currentPage = originalPage;
+  }
+
+  if (section && activeSpine == currentSpineIndex) section->currentPage = activePage;
+  return false;
 }
 
 void EpubReaderActivity::openFileTransfer() {

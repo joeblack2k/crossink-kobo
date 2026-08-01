@@ -18,7 +18,7 @@ class EpubReaderMenuActivity final : public Activity {
  public:
   // Menu actions available from the reader menu.
   enum class MenuAction {
-    SELECT_CHAPTER,
+    SEARCH_BY_LINE,
     FOOTNOTES,
     GO_TO_PERCENT,
     AUTO_PAGE_TURN,
@@ -68,6 +68,9 @@ class EpubReaderMenuActivity final : public Activity {
   struct MenuItem {
     MenuAction action;
     StrId labelId;
+    // This reader-only action needs a clearer label than the generic i18n
+    // "Search" string.  Keep the rest of the menu on the normal i18n path.
+    const char* customLabel = nullptr;
   };
 
   enum class MenuTab : uint8_t { Main = 0, Bookmarks = 1, Settings = 2 };

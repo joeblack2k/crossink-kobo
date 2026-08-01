@@ -2,6 +2,7 @@
 #include <Epub.h>
 #include <Epub/FootnoteEntry.h>
 #include <Epub/Section.h>
+
 #include <memory>
 #include <optional>
 #include <string>
@@ -219,6 +220,9 @@ class EpubReaderActivity final : public Activity {
   bool executeLongPowerButtonAction();
   void handleClippingJump(const ClippingJumpResult& clipping);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
+  // Finds a case-insensitive, whitespace-normalized line in the current
+  // EPUB and returns the rendered spine/page that contains it.
+  bool findLineInBook(const std::string& query, int& matchedSpine, int& matchedPage);
   // Opens the reader menu for the current position (short-press Confirm)
   void openReaderMenu();
   void applyOrientation(uint8_t orientation);

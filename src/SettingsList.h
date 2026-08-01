@@ -315,7 +315,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     }
     {
       SettingInfo refreshProfile;
-      refreshProfile.nameId = StrId::STR_DISPLAY_REFRESH;
+      refreshProfile.nameId = StrId::STR_DISPLAY_SPEED;
       refreshProfile.type = SettingType::ENUM;
       refreshProfile.valuePtr = &CrossPointSettings::koboRefreshProfile;
       refreshProfile.enumStringValues = {"Safe"};
@@ -323,6 +323,12 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
       if (crossink::kobo::koboFastRefreshQualified()) {
         refreshProfile.enumStringValues.emplace_back("Fast");
         refreshProfile.enumRawValues.emplace_back(CrossPointSettings::KOBO_REFRESH_FAST);
+      }
+      if (crossink::kobo::koboMaxBetaRefreshQualified()) {
+        // The label is intentionally a warning, not a promise of an
+        // overclock. This profile is selectable only after its own marker.
+        refreshProfile.enumStringValues.emplace_back("Max (beta - experimental)");
+        refreshProfile.enumRawValues.emplace_back(CrossPointSettings::KOBO_REFRESH_MAX_BETA);
       }
       refreshProfile.key = "koboRefreshProfile";
       refreshProfile.category = StrId::STR_CAT_DISPLAY;
@@ -439,7 +445,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                            StrId::STR_READER_DARK_MODE,
                            StrId::STR_FOOTNOTES,
                            StrId::STR_BROWSE_FILES,
-                           StrId::STR_SAVE_CLIPPING},
+                           StrId::STR_SAVE_CLIPPING,
+                           StrId::STR_FRONTLIGHT},
                           "shortPwrBtn", StrId::STR_CAT_CONTROLS)
             .withEnumRawValues({CrossPointSettings::IGNORE,
                                 CrossPointSettings::SLEEP,
@@ -461,7 +468,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                                 CrossPointSettings::TOGGLE_DARK_MODE,
                                 CrossPointSettings::FOOTNOTES,
                                 CrossPointSettings::FILE_BROWSER,
-                                CrossPointSettings::CREATE_CLIPPING}));
+                                CrossPointSettings::CREATE_CLIPPING,
+                                CrossPointSettings::CYCLE_FRONTLIGHT}));
     add(SettingInfo::Enum(StrId::STR_LONG_PRESS_ACTION, &CrossPointSettings::longPwrBtn,
                           {StrId::STR_IGNORE,
                            StrId::STR_SLEEP,
@@ -930,7 +938,7 @@ inline std::vector<SettingInfo> buildGroupedDisplaySettingsList(const std::vecto
   }
   addDisplaySetting(StrId::STR_REFRESH_FREQ);
 #ifdef KOBO_LINUX
-  addDisplaySetting(StrId::STR_DISPLAY_REFRESH);
+  addDisplaySetting(StrId::STR_DISPLAY_SPEED);
   addDisplaySetting(StrId::STR_FRONTLIGHT);
   addDisplaySetting(StrId::STR_UI_SCALE);
 #endif

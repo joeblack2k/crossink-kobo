@@ -22,9 +22,6 @@
 #include "FileBrowserActionActivity.h"
 #include "MappedInputManager.h"
 #include "OpdsCatalogStore.h"
-#include "network/OpdsCoverCache.h"
-#include "network/LocalCoverCache.h"
-#include "network/OpdsOfflineSync.h"
 #include "OpdsServerStore.h"
 #include "RecentBookProgress.h"
 #include "RecentBooksStore.h"
@@ -41,6 +38,9 @@
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "fontIds.h"
+#include "network/LocalCoverCache.h"
+#include "network/OpdsCoverCache.h"
+#include "network/OpdsOfflineSync.h"
 
 namespace {
 constexpr int kCoverCornerRadius = 2;
@@ -248,6 +248,15 @@ void RecentBooksGridActivity::loadRecentBooks() {
       allRecentBooks.push_back(BookState{std::move(book), -1.0f, false, true, catalogBook.availability,
                                          servers.front().id, std::move(entry)});
     }
+    // Catalog cards are a library, not a viewport cache. Queue every missing
+    // remote thumbnail at low priority while the worker remains single-flight;
+    // this lets later pages have covers without parsing EPUBs or blocking the
+    // current render. request() is idempotent, so re-entering the tab is safe.
+    for (const auto& state : allRecentBooks) {
+      if (state.book.coverBmpPath.empty() || !Storage.exists(state.book.coverBmpPath.c_str())) {
+        OPDS_COVER_CACHE.request(state.serverUrl, state.opdsEntry);
+      }
+    }
     applySearch();
     return;
   }
@@ -372,11 +381,15 @@ void RecentBooksGridActivity::loadPageCovers(int pageStart) {
   const int pageEnd = std::min(pageStart + BOOKS_PER_PAGE, static_cast<int>(recentBooks.size()));
   for (int i = pageStart; i < pageEnd; ++i) {
     RecentBook& book = recentBooks[i].book;
-    if (recentBooks[i].catalogBook && recentBooks[i].availability != OpdsCatalogAvailability::AvailableOffline) {
-      // Remote OPDS cards are still library cards: queue just the visible
-      // page's cover as a low-priority background job.  Never perform HTTP or
-      // image decoding in this render-side maintenance pass.
-      OPDS_COVER_CACHE.request(recentBooks[i].serverUrl, recentBooks[i].opdsEntry);
+    if (recentBooks[i].catalogBook) {
+      // The OPDS cover is the canonical fallback for both remote cards and a
+      // downloaded EPUB whose embedded cover is unsupported (for example a
+      // progressive JPEG).  Never parse an EPUB from this render-side pass:
+      // queue only a visible-card OPDS cover job when its durable BMP is
+      // absent.
+      if (book.coverBmpPath.empty() || !Storage.exists(book.coverBmpPath.c_str())) {
+        OPDS_COVER_CACHE.request(recentBooks[i].serverUrl, recentBooks[i].opdsEntry);
+      }
       continue;
     }
     ensureReusableCoverPath(book);
@@ -395,7 +408,7 @@ void RecentBooksGridActivity::onEnter() {
   selectorIndex = 0;
   loadedPageStart = NO_PAGE_LOADED;
   ensureProgressLoaded(selectorIndex);
-  if (view == LibraryView::Catalog) OPDS_OFFLINE_SYNC.startPrimaryIfEnabled();
+  observedCatalogChangeSerial = OPDS_OFFLINE_SYNC.changeSerial();
   requestUpdate();
 }
 
@@ -406,18 +419,25 @@ void RecentBooksGridActivity::onExit() {
 }
 
 void RecentBooksGridActivity::loop() {
-  OPDS_COVER_CACHE.tick();
   LOCAL_COVER_CACHE.tick();
-  if (view == LibraryView::Catalog && OPDS_OFFLINE_SYNC.tick()) {
+  if (view == LibraryView::Catalog && observedCatalogChangeSerial != OPDS_OFFLINE_SYNC.changeSerial()) {
     // Availability changes are persisted by the sync coordinator.  Rehydrate
     // this view so a successfully downloaded card becomes immediately usable.
     loadRecentBooks();
     selectorIndex = std::min(selectorIndex, std::max(0, static_cast<int>(recentBooks.size()) - 1));
     loadedPageStart = NO_PAGE_LOADED;
+    observedCatalogChangeSerial = OPDS_OFFLINE_SYNC.changeSerial();
   }
   bool coverChanged = false;
   OpdsCoverCache::Change coverChange;
   while (OPDS_COVER_CACHE.takeChange(coverChange)) {
+    for (auto& state : allRecentBooks) {
+      if (!state.catalogBook || state.serverUrl != coverChange.serverId ||
+          OpdsCatalogStore::stableBookId(state.opdsEntry) != coverChange.entryId) {
+        continue;
+      }
+      if (coverChange.state == OpdsCoverCache::State::Ready) state.book.coverBmpPath = coverChange.bmpPath;
+    }
     for (auto& state : recentBooks) {
       if (!state.catalogBook || state.serverUrl != coverChange.serverId ||
           OpdsCatalogStore::stableBookId(state.opdsEntry) != coverChange.entryId) {
@@ -498,7 +518,10 @@ void RecentBooksGridActivity::loop() {
         launchLocalSearch();
         return;
       case kActionSync:
-        if (view == LibraryView::Catalog) activityManager.goToLibrary(true);
+        if (view == LibraryView::Catalog) {
+          OPDS_OFFLINE_SYNC.requestCatalogRefresh();
+          requestUpdate();
+        }
         return;
       case kActionMenu:
         openNavigationOverlay();
@@ -555,6 +578,12 @@ void RecentBooksGridActivity::loop() {
     if (!recentBooks.empty() && selectorIndex >= 0 && selectorIndex < static_cast<int>(recentBooks.size())) {
       const auto& selected = recentBooks[selectorIndex];
       if (selected.catalogBook && selected.availability != OpdsCatalogAvailability::AvailableOffline) {
+        if (selected.availability == OpdsCatalogAvailability::Downloading) {
+          // The single-worker coordinator already owns this EPUB. Opening a
+          // second direct browser would create a competing `.part` writer.
+          LOG_DBG("RBGA", "Ignoring duplicate tap for OPDS download: %s", selected.opdsEntry.title.c_str());
+          return;
+        }
         const auto& servers = OPDS_STORE.getServers();
         if (servers.empty()) {
           LOG_ERR("RBGA", "No OPDS server configured for catalog download");
@@ -676,6 +705,7 @@ void RecentBooksGridActivity::showBookActionMenu(const int bookIndex, const bool
   const BookState state = recentBooks[bookIndex];
   const RecentBook book = state.book;
   if (state.catalogBook && state.availability != OpdsCatalogAvailability::AvailableOffline) {
+    if (state.availability == OpdsCatalogAvailability::Downloading) return;
     const auto& servers = OPDS_STORE.getServers();
     if (!servers.empty()) {
       activityManager.replaceActivity(
@@ -839,15 +869,42 @@ void RecentBooksGridActivity::render(RenderLock&&) {
   TOUCH_UI.registerDirect(searchX, searchY, searchTouchSize, headerActionHeight, TouchUiRegistry::TargetKind::Tab,
                           kActionSearch);
   if (view == LibraryView::Catalog) {
-    // Refresh glyph: a compact circular arrow, paired with a real catalog
-    // refresh route rather than a decorative status icon.
+    // The header indicator is also a real action. Its shape distinguishes an
+    // idle refresh from metadata sync, sequential downloads and a retained
+    // failure without spending another row of the dense 300-ppi grid.
+    const auto syncStatus = OPDS_OFFLINE_SYNC.status();
     const int radius = std::max(8, searchGlyphSize / 3);
     const int centerX = syncX + searchTouchSize / 2;
     const int centerY = searchY + searchTouchSize / 2;
-    renderer.drawArc(radius, centerX, centerY, -1, -1, 2, true);
-    renderer.drawArc(radius, centerX, centerY, 1, 1, 2, true);
-    renderer.drawLine(centerX + radius - 1, centerY - radius / 2, centerX + radius + 5, centerY - radius / 2 - 5, 2,
-                      true);
+    if (syncStatus.phase == OpdsOfflineSync::Phase::SyncingMetadata) {
+      renderer.drawRoundedRect(centerX - radius, centerY - radius, radius * 2, radius * 2, 2, radius, true);
+      renderer.fillRectDither(centerX - radius + 3, centerY - radius + 3, radius * 2 - 6, radius * 2 - 6,
+                              Color::LightGray);
+    } else if (syncStatus.phase == OpdsOfflineSync::Phase::Downloading) {
+      renderer.drawRect(centerX - radius, centerY - radius, radius * 2, radius * 2);
+      const int filled = syncStatus.total == 0 ? radius
+                                               : std::max(1, (radius * 2 - 4) * static_cast<int>(syncStatus.completed) /
+                                                                 static_cast<int>(syncStatus.total));
+      renderer.fillRect(centerX - radius + 2, centerY + radius - 2 - filled, radius * 2 - 4, filled);
+    } else if (syncStatus.phase == OpdsOfflineSync::Phase::Failed) {
+      renderer.drawLine(centerX - radius, centerY - radius, centerX + radius, centerY + radius, 3, true);
+      renderer.drawLine(centerX + radius, centerY - radius, centerX - radius, centerY + radius, 3, true);
+    } else if (syncStatus.phase == OpdsOfflineSync::Phase::Paused) {
+      renderer.fillRect(centerX - radius / 2 - 3, centerY - radius, 4, radius * 2);
+      renderer.fillRect(centerX + radius / 2 - 1, centerY - radius, 4, radius * 2);
+    } else if (syncStatus.phase == OpdsOfflineSync::Phase::Offline) {
+      renderer.drawRoundedRect(centerX - radius, centerY - radius / 2, radius * 2, radius, 2, radius / 2, true);
+      renderer.drawLine(centerX - radius, centerY + radius, centerX + radius, centerY - radius, 3, true);
+    } else if (syncStatus.lastSuccessMs != 0) {
+      renderer.drawRoundedRect(centerX - radius, centerY - radius, radius * 2, radius * 2, 2, radius, true);
+      renderer.drawLine(centerX - radius / 2, centerY, centerX - 1, centerY + radius / 2, 2, true);
+      renderer.drawLine(centerX - 1, centerY + radius / 2, centerX + radius / 2 + 2, centerY - radius / 2, 2, true);
+    } else {
+      renderer.drawArc(radius, centerX, centerY, -1, -1, 2, true);
+      renderer.drawArc(radius, centerX, centerY, 1, 1, 2, true);
+      renderer.drawLine(centerX + radius - 1, centerY - radius / 2, centerX + radius + 5, centerY - radius / 2 - 5, 2,
+                        true);
+    }
     TOUCH_UI.registerDirect(syncX, searchY, searchTouchSize, headerActionHeight, TouchUiRegistry::TargetKind::Tab,
                             kActionSync);
   }
@@ -941,6 +998,13 @@ void RecentBooksGridActivity::render(RenderLock&&) {
             renderer.drawBitmap(bmp, coverX, coverY, coverWidth, coverHeight, cropX, cropY);
             renderer.maskRoundedRectOutsideCorners(coverX, coverY, coverWidth, coverHeight, kCoverCornerRadius,
                                                    Color::White);
+            if (remoteOnly) {
+              // A cached remote cover must retain the same unmistakably light
+              // availability state as its placeholder. A deterministic mono
+              // dither overlay is stable on Pearl and avoids alpha artefacts.
+              renderer.fillRectDither(coverX + 2, coverY + 2, std::max(1, coverWidth - 4), std::max(1, coverHeight - 4),
+                                      Color::White);
+            }
             renderer.drawRoundedRect(coverX, coverY, coverWidth, coverHeight, 2, kCoverCornerRadius, true);
             drawn = true;
           }

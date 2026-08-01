@@ -1,24 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <unistd.h>
+
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
-#include <unistd.h>
-
 #include "DisplayBenchmark.h"
+#include "KoboCpuFreq.h"
 #include "KoboDrmDisplay.h"
 #include "KoboFbInkDisplay.h"
-#include "KoboCpuFreq.h"
 #include "KoboRefreshQualification.h"
+#include "KoboRefreshScheduler.h"
 
-using crossink::kobo::KoboFbInkDisplay;
 using crossink::kobo::KoboDrmDisplay;
-using crossink::kobo::RefreshRegion;
+using crossink::kobo::KoboFbInkDisplay;
 using crossink::kobo::RefreshKind;
+using crossink::kobo::RefreshRegion;
 using crossink::kobo::SourceTransform;
 
 namespace {
@@ -52,6 +53,7 @@ constexpr int kThermalRiseStopMilliC = 15'000;
 enum class BenchmarkProfile : std::uint8_t {
   Safe,
   Fast,
+  MaxBeta,
 };
 
 void setPixel(Frame& frame, uint16_t logicalX, uint16_t logicalY, bool white) {
@@ -127,12 +129,33 @@ BenchmarkProfile parseProfile(const char* value, bool& ok) {
   ok = true;
   if (std::strcmp(value, "safe") == 0) return BenchmarkProfile::Safe;
   if (std::strcmp(value, "fast") == 0) return BenchmarkProfile::Fast;
+  if (std::strcmp(value, "max-beta") == 0) return BenchmarkProfile::MaxBeta;
   ok = false;
   return BenchmarkProfile::Safe;
 }
 
 const char* profileName(const BenchmarkProfile profile) {
-  return profile == BenchmarkProfile::Fast ? "Fast" : "Safe";
+  switch (profile) {
+    case BenchmarkProfile::Fast:
+      return "Fast";
+    case BenchmarkProfile::MaxBeta:
+      return "Max (beta)";
+    case BenchmarkProfile::Safe:
+    default:
+      return "Safe";
+  }
+}
+
+crossink::kobo::RefreshProfile schedulerProfile(const BenchmarkProfile profile) {
+  switch (profile) {
+    case BenchmarkProfile::Fast:
+      return crossink::kobo::RefreshProfile::Fast;
+    case BenchmarkProfile::MaxBeta:
+      return crossink::kobo::RefreshProfile::MaxBeta;
+    case BenchmarkProfile::Safe:
+    default:
+      return crossink::kobo::RefreshProfile::Safe;
+  }
 }
 
 unsigned long parseUnsigned(const char* value, const unsigned long maximum, const bool allowZero, bool& ok) {
@@ -145,10 +168,11 @@ unsigned long parseUnsigned(const char* value, const unsigned long maximum, cons
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc < 2 || argc > 9) {
+  if (argc < 2 || argc > 11) {
     std::fprintf(stderr,
                  "usage: %s identity|clockwise|counterclockwise [fast|partial|full [iterations [delay-ms "
-                 "[--mixed] [--profile safe|fast] [--qualify-fast]]]]\n",
+                 "[--mixed] [--profile safe|fast|max-beta] [--qualify-fast|--qualify-max] "
+                 "[--hold-screen-ms 0..60000]]]]\n",
                  argv[0]);
     return 2;
   }
@@ -162,15 +186,22 @@ int main(int argc, char** argv) {
   const unsigned long delayMs = argc >= 5 ? parseUnsigned(argv[4], 60000, true, valid) : 0;
   if (!valid) return 2;
   bool qualifyFast = false;
+  bool qualifyMax = false;
   bool mixedPattern = false;
+  unsigned long holdScreenMs = 0;
   BenchmarkProfile profile = BenchmarkProfile::Safe;
   for (int index = 5; index < argc; ++index) {
     if (std::strcmp(argv[index], "--qualify-fast") == 0) {
       qualifyFast = true;
+    } else if (std::strcmp(argv[index], "--qualify-max") == 0) {
+      qualifyMax = true;
     } else if (std::strcmp(argv[index], "--mixed") == 0) {
       mixedPattern = true;
     } else if (std::strcmp(argv[index], "--profile") == 0 && index + 1 < argc) {
       profile = parseProfile(argv[++index], valid);
+      if (!valid) return 2;
+    } else if (std::strcmp(argv[index], "--hold-screen-ms") == 0 && index + 1 < argc) {
+      holdScreenMs = parseUnsigned(argv[++index], 60000, true, valid);
       if (!valid) return 2;
     } else {
       return 2;
@@ -180,10 +211,14 @@ int main(int argc, char** argv) {
     std::fputs("Mixed qualification only supports logical portrait identity\n", stderr);
     return 2;
   }
-  if (qualifyFast && (profile != BenchmarkProfile::Fast || transform != SourceTransform::Identity ||
-                      refresh != RefreshKind::Fast || iterations < 1000U || !mixedPattern)) {
-    std::fputs("Fast qualification requires identity transform, fast refresh, mixed regions and at least 1000 iterations\n",
-               stderr);
+  if (qualifyFast && qualifyMax) return 2;
+  if ((qualifyFast && profile != BenchmarkProfile::Fast) || (qualifyMax && profile != BenchmarkProfile::MaxBeta) ||
+      ((qualifyFast || qualifyMax) && (transform != SourceTransform::Identity || refresh != RefreshKind::Fast ||
+                                       iterations < 1000U || !mixedPattern))) {
+    std::fputs(
+        "Fast/Max qualification requires its matching profile, identity transform, fast refresh, mixed regions and at "
+        "least 1000 iterations\n",
+        stderr);
     return 2;
   }
 
@@ -208,23 +243,30 @@ int main(int argc, char** argv) {
     const int baselineTemperature = crossink::kobo::readSocTemperatureMilliC();
     const int cpuBefore = cpuBoost.currentFrequencyKhz();
     const std::string governorBefore = cpuBoost.currentGovernor();
-    if (profile == BenchmarkProfile::Fast && (baselineTemperature < 0 || !cpuBoost.beginPerformanceBoost())) {
-      std::fprintf(stderr, "Fast benchmark unavailable: temperature=%d cpu=%s\n", baselineTemperature,
-                   cpuBoost.lastError().c_str());
+    if (profile != BenchmarkProfile::Safe && (baselineTemperature < 0 || !cpuBoost.beginPerformanceBoost())) {
+      std::fprintf(stderr, "%s benchmark unavailable: temperature=%d cpu=%s\n", profileName(profile),
+                   baselineTemperature, cpuBoost.lastError().c_str());
       return 1;
     }
     const int cpuDuring = cpuBoost.currentFrequencyKhz();
     const std::string governorDuring = cpuBoost.currentGovernor();
     const auto start = std::chrono::steady_clock::now();
     static std::array<std::uint32_t, 10000> submitMicros{};
+    crossink::kobo::KoboRefreshScheduler scheduler(KoboFbInkDisplay::kPanelWidth, KoboFbInkDisplay::kPanelHeight);
+    if (!scheduler.select(schedulerProfile(profile), true)) {
+      std::fprintf(stderr, "Could not enter transient %s benchmark profile\n", profileName(profile));
+      return 1;
+    }
+    unsigned int forcedFullRefreshes = 0;
     for (unsigned long iteration = 0; iteration < iterations; ++iteration) {
       // Toggle a bounded central region so repeated refreshes exercise changed
       // pixels without destroying the orientation and button-frame markers.
       const LogicalRegion logical = mixedPattern ? kMixedRegions[iteration % kMixedRegions.size()] : kMixedRegions[0];
       filledRectangle(frame, logical.x, logical.y, logical.width, logical.height, (iteration % 2U) != 0U);
       const RefreshRegion region = toPanelRegion(logical);
+      const auto decision = scheduler.schedule(refresh, region, true);
       const auto submitted = std::chrono::steady_clock::now();
-      const bool presented = drm.presentPackedMono(frame.data(), frame.size(), refresh, region);
+      const bool presented = drm.presentPackedMono(frame.data(), frame.size(), decision.waveform, decision.region);
       const auto completed = std::chrono::steady_clock::now();
       const auto submitMicrosValue =
           std::chrono::duration_cast<std::chrono::microseconds>(completed - submitted).count();
@@ -233,29 +275,35 @@ int main(int argc, char** argv) {
         return 1;
       }
       submitMicros[iteration] = static_cast<std::uint32_t>(submitMicrosValue);
-      const std::int64_t deadline = refresh == RefreshKind::Full ? kFullSubmitDeadlineMicros : kPartialSubmitDeadlineMicros;
+      const std::int64_t deadline =
+          decision.waveform == RefreshKind::Full ? kFullSubmitDeadlineMicros : kPartialSubmitDeadlineMicros;
       if (!presented || submitMicrosValue > deadline) {
         std::fprintf(stderr,
                      "profile=%s pattern=%s waveform=%s failed_iteration=%lu ioctl_failures=%u deadline_exceeded=%u "
                      "submit_us=%lld errno=%d\n",
-                     profileName(profile), mixedPattern ? "mixed" : "fixed", refresh == RefreshKind::Fast ? "DU" :
-                     (refresh == RefreshKind::Partial ? "AUTO" : "GC16"), iteration + 1, presented ? 0U : 1U,
-                     submitMicrosValue > deadline ? 1U : 0U, static_cast<long long>(submitMicrosValue), drm.lastError());
+                     profileName(profile), mixedPattern ? "mixed" : "fixed",
+                     crossink::kobo::refreshKindName(decision.waveform), iteration + 1, presented ? 0U : 1U,
+                     submitMicrosValue > deadline ? 1U : 0U, static_cast<long long>(submitMicrosValue),
+                     drm.lastError());
         return 1;
       }
-      if (profile == BenchmarkProfile::Fast && (iteration % 10U) == 0U) {
+      scheduler.recordSuccess(decision);
+      if (decision.forcedFull || decision.waveform == RefreshKind::Full) ++forcedFullRefreshes;
+      if (profile != BenchmarkProfile::Safe && (iteration % 10U) == 0U) {
         const int temperature = crossink::kobo::readSocTemperatureMilliC();
-        if (temperature < 0 || temperature >= kThermalStopMilliC || temperature - baselineTemperature >= kThermalRiseStopMilliC) {
-          std::fprintf(stderr, "Fast benchmark thermal stop at iteration %lu: baseline=%d current=%d\n",
-                       iteration + 1, baselineTemperature, temperature);
+        if (temperature < 0 || temperature >= kThermalStopMilliC ||
+            temperature - baselineTemperature >= kThermalRiseStopMilliC) {
+          std::fprintf(stderr, "Fast benchmark thermal stop at iteration %lu: baseline=%d current=%d\n", iteration + 1,
+                       baselineTemperature, temperature);
           return 1;
         }
       }
       if (delayMs > 0) ::usleep(delayMs * 1000UL);
     }
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
-    if (profile == BenchmarkProfile::Fast && !cpuBoost.endPerformanceBoost()) {
-      std::fputs("Fast benchmark governor restore failed\n", stderr);
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    if (profile != BenchmarkProfile::Safe && !cpuBoost.endPerformanceBoost()) {
+      std::fprintf(stderr, "%s benchmark governor restore failed\n", profileName(profile));
       return 1;
     }
     const int cpuAfter = cpuBoost.currentFrequencyKhz();
@@ -264,22 +312,41 @@ int main(int argc, char** argv) {
     std::printf("backend=drm geometry=%ux%u iterations=%lu elapsed_ms=%lld\n", KoboFbInkDisplay::kPortraitWidth,
                 KoboFbInkDisplay::kPortraitHeight, iterations, static_cast<long long>(elapsed.count()));
     const auto summary = crossink::kobo::summarizeDisplaySubmissionMicros(submitMicros.data(), iterations);
-    std::printf("profile=%s pattern=%s waveform=%s submit_us_min=%u p50=%u p95=%u max=%u total=%llu "
-                "ioctl_failures=0 deadline_exceeded=0 driver_waveforms=DU,AUTO,GC16 gc4_a2=not_exposed "
-                "cpu_before_khz=%d "
-                "cpu_during_khz=%d cpu_after_khz=%d governor_before=%s governor_during=%s governor_after=%s "
-                "temp_before_millic=%d temp_after_millic=%d\n",
-                profileName(profile), mixedPattern ? "mixed" : "fixed", refresh == RefreshKind::Fast ? "DU" :
-                (refresh == RefreshKind::Partial ? "AUTO" : "GC16"), summary.minimumMicros, summary.p50Micros,
-                summary.p95Micros, summary.maximumMicros, static_cast<unsigned long long>(summary.totalMicros), cpuBefore,
-                cpuDuring, cpuAfter, governorBefore.c_str(), governorDuring.c_str(), governorAfter.c_str(),
-                baselineTemperature, finalTemperature);
-    if (qualifyFast) {
+    std::printf(
+        "profile=%s pattern=%s requested_waveform=%s submit_us_min=%u p50=%u p95=%u max=%u total=%llu "
+        "ioctl_failures=0 deadline_exceeded=0 forced_gc16=%u driver_waveforms=DU,AUTO,GC16 gc4_a2=not_exposed "
+        "cpu_before_khz=%d "
+        "cpu_during_khz=%d cpu_after_khz=%d governor_before=%s governor_during=%s governor_after=%s "
+        "temp_before_millic=%d temp_after_millic=%d\n",
+        profileName(profile), mixedPattern ? "mixed" : "fixed",
+        refresh == RefreshKind::Fast ? "DU" : (refresh == RefreshKind::Partial ? "AUTO" : "GC16"),
+        summary.minimumMicros, summary.p50Micros, summary.p95Micros, summary.maximumMicros,
+        static_cast<unsigned long long>(summary.totalMicros), forcedFullRefreshes, cpuBefore, cpuDuring, cpuAfter,
+        governorBefore.c_str(), governorDuring.c_str(), governorAfter.c_str(), baselineTemperature, finalTemperature);
+    // The DRM object owns the active CRTC.  Keep it alive during visual
+    // inspection, otherwise its destructor restores the previous (often
+    // blank) buffer and a camera would incorrectly report the test as a
+    // black-screen regression.  Qualification is deliberately written only
+    // after this complete, interruptible inspection window.
+    if (holdScreenMs > 0U) {
+      std::printf("hold_screen_ms=%lu physical_inspection=active\n", holdScreenMs);
+      std::fflush(stdout);
+      unsigned long remainingMs = holdScreenMs;
+      while (remainingMs > 0U) {
+        const unsigned long sliceMs = remainingMs > 1000U ? 1000U : remainingMs;
+        (void)::usleep(sliceMs * 1000U);
+        remainingMs -= sliceMs;
+      }
+      std::puts("physical_inspection=complete");
+    }
+    if (qualifyFast || qualifyMax) {
       // Persist only after all iterations succeeded and the prior governor
       // was restored.  A marker is device/kernel-bound and never created by
       // the normal UI.
-      if (!crossink::kobo::recordKoboFastRefreshQualification()) {
-        std::fputs("Fast qualification marker write failed\n", stderr);
+      const auto qualifiedProfile =
+          qualifyMax ? crossink::kobo::RefreshProfile::MaxBeta : crossink::kobo::RefreshProfile::Fast;
+      if (!crossink::kobo::recordKoboRefreshProfileQualification(qualifiedProfile)) {
+        std::fprintf(stderr, "%s qualification marker write failed\n", profileName(profile));
         return 1;
       }
     }

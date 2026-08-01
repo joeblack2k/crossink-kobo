@@ -206,7 +206,12 @@ class CrossPointSettings {
     KOBO_LIBRARY_FILTER_COUNT
   };
 #ifdef KOBO_LINUX
-  enum KOBO_REFRESH_PROFILE { KOBO_REFRESH_SAFE = 0, KOBO_REFRESH_FAST = 1, KOBO_REFRESH_PROFILE_COUNT };
+  enum KOBO_REFRESH_PROFILE {
+    KOBO_REFRESH_SAFE = 0,
+    KOBO_REFRESH_FAST = 1,
+    KOBO_REFRESH_MAX_BETA = 2,
+    KOBO_REFRESH_PROFILE_COUNT
+  };
 #endif
 
   // Short power button press actions
@@ -233,6 +238,10 @@ class CrossPointSettings {
     JOIN_NETWORK = 19,
     CREATE_HOTSPOT = 20,
     CREATE_CLIPPING = 21,
+    // Kobo Glo HD has a dedicated physical power key and a white-only
+    // frontlight.  This action cycles the practical touch-free levels
+    // 0/20/40/60/80/100 percent.
+    CYCLE_FRONTLIGHT = 22,
     SHORT_PWRBTN_COUNT
   };
 
@@ -357,7 +366,7 @@ class CrossPointSettings {
   uint8_t readerDarkMode = 0;
   // Short power button action behaviour
 #ifdef KOBO_LINUX
-  uint8_t shortPwrBtn = SLEEP;
+  uint8_t shortPwrBtn = CYCLE_FRONTLIGHT;
 #else
   uint8_t shortPwrBtn = IGNORE;
 #endif
@@ -413,8 +422,9 @@ class CrossPointSettings {
   // Glo HD's 300 ppi panel needs a larger touch UI than the X4 baseline.
   // Reader typography remains a separate setting.
   uint8_t koboUiScalePercent = 200;
-  // Fast remains rejected unless the N437/kernel-specific qualification file
-  // proves its full physical soak. MaxBeta is never persisted or exposed.
+  // Fast and Max (beta) remain rejected unless their own N437/kernel/binary
+  // qualification files prove a full physical soak. Safe is the only boot
+  // default and the only value accepted without that hardware evidence.
   uint8_t koboRefreshProfile = KOBO_REFRESH_SAFE;
   // The USB/Wi-Fi web transfer service is a normal always-available Kobo
   // feature. Users can disable it explicitly, but a new install is on and
