@@ -1,6 +1,6 @@
-#include "BoundedFifo.h"
-
 #include <cstdlib>
+
+#include "BoundedFifo.h"
 
 struct Item {
   int value = 0;

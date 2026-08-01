@@ -423,9 +423,7 @@ void MappedInputManager::clearInjectedInputFrame() {
   injectedReleased.fill(false);
 }
 
-void MappedInputManager::clearInjectedTouchTargets() {
-  injectedTouchTargets.clear();
-}
+void MappedInputManager::clearInjectedTouchTargets() { injectedTouchTargets.clear(); }
 
 void MappedInputManager::injectTouchTarget(const unsigned char kind, const int primary, const int secondary,
                                            const std::uint32_t generation, const int x, const int y) {
@@ -448,8 +446,7 @@ bool MappedInputManager::consumeTouchTarget(TouchTarget& target) {
 
 bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& currentIndex) {
   const TouchTarget* queued = injectedTouchTargets.front();
-  if (queued == nullptr ||
-      queued->kind != static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) {
+  if (queued == nullptr || queued->kind != static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) {
     return false;
   }
   TouchTarget target{};
