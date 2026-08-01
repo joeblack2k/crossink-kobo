@@ -20,6 +20,7 @@ namespace {
 constexpr char kInterface[] = "wlan0";
 constexpr char kStationConfig[] = "/run/crossink-wpa.conf";
 constexpr char kHostapdConfig[] = "/run/crossink-hostapd.conf";
+constexpr char kScanOutput[] = "/run/crossink-iw-scan.txt";
 
 int run(const char* command) { return std::system(command); }
 
@@ -88,10 +89,12 @@ void WiFiClass::mode(const int requestedMode) {
 }
 
 int WiFiClass::scanNetworks(bool, bool, bool, uint32_t, uint8_t) {
+  stopScan();
   networks_.clear();
   scanFailed_ = false;
   mode(WIFI_STA);
   scanPending_ = true;
+  startScan();
   return WIFI_SCAN_RUNNING;
 }
 
@@ -99,7 +102,13 @@ bool WiFiClass::loadScanResults() {
   // Do not hide stderr here.  The Broadcom driver reports a dead SDIO bus as
   // "command failed"; presenting that as an empty scan made Settings claim
   // there were simply no networks and encouraged repeated scans.
-  const std::string output = capture("iw dev wlan0 scan 2>&1");
+  std::ifstream scanFile(kScanOutput);
+  if (!scanFile.is_open()) {
+    scanFailed_ = true;
+    networks_.clear();
+    return false;
+  }
+  const std::string output((std::istreambuf_iterator<char>(scanFile)), std::istreambuf_iterator<char>());
   scanFailed_ = output.find("command failed:") != std::string::npos ||
                 output.find("Network is down") != std::string::npos ||
                 output.find("Operation not permitted") != std::string::npos;
@@ -146,6 +155,21 @@ bool WiFiClass::loadScanResults() {
 
 int WiFiClass::scanComplete() {
   if (!scanPending_) return static_cast<int>(networks_.size());
+  if (scanPid_ <= 0) {
+    scanFailed_ = true;
+    scanPending_ = false;
+    return WIFI_SCAN_FAILED;
+  }
+  int childStatus = 0;
+  const pid_t result = ::waitpid(scanPid_, &childStatus, WNOHANG);
+  if (result == 0) return WIFI_SCAN_RUNNING;
+  if (result < 0 || result != scanPid_) {
+    scanFailed_ = true;
+    scanPending_ = false;
+    scanPid_ = -1;
+    return WIFI_SCAN_FAILED;
+  }
+  scanPid_ = -1;
   loadScanResults();
   scanPending_ = false;
   if (scanFailed_) return WIFI_SCAN_FAILED;
@@ -153,6 +177,7 @@ int WiFiClass::scanComplete() {
 }
 
 void WiFiClass::scanDelete() {
+  stopScan();
   networks_.clear();
   scanPending_ = false;
 }
@@ -161,6 +186,7 @@ wl_status_t WiFiClass::begin(const char* ssid, const char* password) {
   if (ssid == nullptr || ssid[0] == '\0') return status_ = WL_NO_SSID_AVAIL;
   mode(WIFI_STA);
   currentSsid_ = ssid;
+  stopScan();
   stopDhcp();
   dhcpAttempted_ = false;
   run("killall wpa_supplicant >/dev/null 2>&1");
@@ -207,6 +233,7 @@ wl_status_t WiFiClass::status() {
 }
 
 void WiFiClass::disconnect(const bool wifiOff, bool) {
+  stopScan();
   stopDhcp();
   run("killall wpa_supplicant >/dev/null 2>&1");
   run("ip addr flush dev wlan0 >/dev/null 2>&1");
@@ -220,6 +247,45 @@ void WiFiClass::disconnect(const bool wifiOff, bool) {
 }
 
 IPAddress WiFiClass::localIP() const { return interfaceAddress(kInterface); }
+
+void WiFiClass::stopScan() {
+  if (scanPid_ > 0) {
+    (void)::kill(scanPid_, SIGTERM);
+    for (int attempt = 0; attempt < 10; ++attempt) {
+      const pid_t result = ::waitpid(scanPid_, nullptr, WNOHANG);
+      if (result == scanPid_ || result < 0) {
+        scanPid_ = -1;
+        (void)::unlink(kScanOutput);
+        return;
+      }
+      ::usleep(1000);
+    }
+    (void)::kill(scanPid_, SIGKILL);
+    (void)::waitpid(scanPid_, nullptr, 0);
+    scanPid_ = -1;
+  }
+  (void)::unlink(kScanOutput);
+}
+
+void WiFiClass::startScan() {
+  const pid_t child = ::fork();
+  if (child < 0) {
+    scanFailed_ = true;
+    scanPending_ = false;
+    return;
+  }
+  if (child == 0) {
+    const int descriptor = ::open(kScanOutput, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (descriptor >= 0) {
+      (void)::dup2(descriptor, STDOUT_FILENO);
+      (void)::dup2(descriptor, STDERR_FILENO);
+      ::close(descriptor);
+    }
+    ::execlp("iw", "iw", "dev", kInterface, "scan", static_cast<char*>(nullptr));
+    _exit(127);
+  }
+  scanPid_ = child;
+}
 
 void WiFiClass::stopDhcp() {
   if (dhcpPid_ <= 0) return;

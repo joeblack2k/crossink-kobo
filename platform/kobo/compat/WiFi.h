@@ -90,11 +90,14 @@ class WiFiClass {
   // visible APs.  The activity can then leave the previous radio state alone
   // rather than treating an I/O failure as an empty neighbourhood.
   bool scanFailed_ = false;
+  pid_t scanPid_ = -1;
   bool dhcpAttempted_ = false;
   pid_t dhcpPid_ = -1;
   bool autoReconnect_ = false;
 
   bool loadScanResults();
+  void stopScan();
+  void startScan();
   void stopDhcp();
   void startDhcp();
 };
