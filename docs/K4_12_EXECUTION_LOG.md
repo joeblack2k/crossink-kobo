@@ -59,7 +59,7 @@ ci_apply=
 | NET-01 | IN_PROGRESS | afc4e3b2 | source review; latency test not available on macOS | N437 timing evidence ontbreekt | Background saved-network service is rate-limited to 500 ms; `iw` scan and DHCP failure/latency tests remain open. |
 | WEB-01 | IN_PROGRESS | d0c28537 | source inspection only; no negative HTTP/WebDAV authorization tests yet | N437 exposure test ontbreekt | Kobo mutating HTTP/WebDAV requests now require the documented USB subnet; WebSocket mutators are not started on Kobo. Token/pairing is not implemented, so broader interface audit remains open. |
 | WEB-02 | FIXED_LOCAL | d0c28537 | source-level atomic staging; failure-injection tests still required | N437 abort/disk-full test ontbreekt | HTTP, WebSocket, font and WebDAV PUT paths stage in same directory and do not remove the prior destination before activation. |
-| SYS-01 | OPEN |  |  |  |  |
+| SYS-01 | FIXED_LOCAL | 6d181167, 5581dea4 | GitHub Actions run `30716555316` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format | N437 runtime I/O trace ontbreekt | Refresh qualification is cached per profile for the process lifetime and invalidated after a new marker is written; the main loop no longer rereads model, kernel, manifest and marker every frame. |
 | SYS-02 | FIXED_LOCAL | 8c82cc9b | shell/Python checks pass; ARM build unavailable on macOS | N437 power trace ontbreekt | Battery/USB sysfs polling in HalGPIO is capped at one snapshot per second while key input remains per-frame. |
 | NET-02 | OPEN |  |  |  |  |
 | NET-03 | OPEN |  |  |  |  |
@@ -183,6 +183,18 @@ tests=GitHub Actions run 30716270944: Kobo host, CTest, dependency-audit, cppche
 hardware=Niet uitgevoerd; N437 suspend/wake/reconnect-soak blijft open.
 commit=aff0b420, 7daf4a16
 remaining_risk=Kernel wake-sourcegedrag, eerste wake-frame, frontlightherstel en fysieke stale-touch/reconnect moeten op de N437 worden gemeten.
+```
+
+### Fase 4 vervolg — refresh qualification
+
+```text
+status=FIXED_LOCAL
+root_cause=syncRefreshProfilePreference() werd iedere hoofdloop uitgevoerd en las voor niet-Safe profielen telkens model, kernel, buildmanifest en qualification-marker opnieuw.
+implementation=6d181167 voegt een kleine procescache per Fast/MaxBeta-profiel toe; recordKoboRefreshProfileQualification() invalideert alleen de betreffende entry na atomische marker-installatie. 5581dea4 volgt clang-format-21.
+tests=GitHub Actions run 30716555316: Kobo host, CTest, dependency-audit, cppcheck en clang-format PASS.
+hardware=Niet uitgevoerd; N437 runtime-I/O en energieprofiel blijven te meten.
+commit=6d181167, 5581dea4
+remaining_risk=Een extern gewijzigde of verwijderde marker wordt pas na procesrestart opnieuw gezien; dat is bewust gekoppeld aan de immutable kernel/binary identity van een firmwareproces.
 ```
 
 ## Commitlog
