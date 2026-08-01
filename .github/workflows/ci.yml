@@ -90,9 +90,10 @@ jobs:
         run: ctest --test-dir build/kobo-host --output-on-failure
 
       - name: Run target-aware dependency audit
-        run: python3 scripts/kobo/audit-kobo-dependencies.py \
-          --compile-commands build/kobo-host/compile_commands.json \
-          --source-root "$GITHUB_WORKSPACE"
+        run: |
+          python3 scripts/kobo/audit-kobo-dependencies.py \
+            --compile-commands build/kobo-host/compile_commands.json \
+            --source-root "$GITHUB_WORKSPACE"
 
   # This job is used as the PR required actions check, allows for changes to other steps in the future without breaking
   # PR requirements.
