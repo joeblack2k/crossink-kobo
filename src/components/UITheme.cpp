@@ -5,9 +5,9 @@
 #include <HalStorage.h>
 #include <Logging.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <algorithm>
 #include <memory>
 
 #include "MappedInputManager.h"
@@ -157,9 +157,9 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   }
 #ifdef KOBO_LINUX
   const int requestedScale = SETTINGS.koboUiScalePercent;
-  const int validScale = requestedScale == 100 || requestedScale == 150 || requestedScale == 200 || requestedScale == 250
-                             ? requestedScale
-                             : 200;
+  const int validScale =
+      requestedScale == 100 || requestedScale == 150 || requestedScale == 200 || requestedScale == 250 ? requestedScale
+                                                                                                       : 200;
   scaledMetrics = scaledKoboMetrics(*currentMetrics, validScale);
   currentMetrics = &scaledMetrics;
 #endif

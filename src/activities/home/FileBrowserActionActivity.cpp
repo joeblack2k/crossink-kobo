@@ -5,8 +5,8 @@
 
 #include <algorithm>
 
-#include "components/UITheme.h"
 #include "components/DirectListTouch.h"
+#include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {

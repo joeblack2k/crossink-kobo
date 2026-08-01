@@ -80,8 +80,7 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
           const auto& metrics = UITheme::getInstance().getMetrics();
           const int iconSize = KoboIconMetrics::coverPlaceholderSize(
               sourceIconSize, tileWidth - 2 * hPaddingInSelection, metrics.homeCoverHeight);
-          KoboIconMetrics::drawScaledSquare(renderer, CoverIcon,
-                                            tileX + (tileWidth - iconSize) / 2,
+          KoboIconMetrics::drawScaledSquare(renderer, CoverIcon, tileX + (tileWidth - iconSize) / 2,
                                             tileY + hPaddingInSelection + (metrics.homeCoverHeight / 3 - iconSize) / 2,
                                             sourceIconSize, iconSize);
         }

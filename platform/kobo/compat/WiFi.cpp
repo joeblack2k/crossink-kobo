@@ -87,13 +87,24 @@ void WiFiClass::mode(const int requestedMode) {
 
 int WiFiClass::scanNetworks(bool, bool, bool, uint32_t, uint8_t) {
   networks_.clear();
+  scanFailed_ = false;
   mode(WIFI_STA);
   scanPending_ = true;
   return WIFI_SCAN_RUNNING;
 }
 
 bool WiFiClass::loadScanResults() {
-  const std::string output = capture("iw dev wlan0 scan 2>/dev/null");
+  // Do not hide stderr here.  The Broadcom driver reports a dead SDIO bus as
+  // "command failed"; presenting that as an empty scan made Settings claim
+  // there were simply no networks and encouraged repeated scans.
+  const std::string output = capture("iw dev wlan0 scan 2>&1");
+  scanFailed_ = output.find("command failed:") != std::string::npos ||
+                output.find("Network is down") != std::string::npos ||
+                output.find("Operation not permitted") != std::string::npos;
+  if (scanFailed_) {
+    networks_.clear();
+    return false;
+  }
   std::istringstream lines(output);
   std::string line;
   networks_.clear();
@@ -135,6 +146,7 @@ int WiFiClass::scanComplete() {
   if (!scanPending_) return static_cast<int>(networks_.size());
   loadScanResults();
   scanPending_ = false;
+  if (scanFailed_) return WIFI_SCAN_FAILED;
   return static_cast<int>(networks_.size());
 }
 
@@ -167,14 +179,16 @@ wl_status_t WiFiClass::begin(const char* ssid, const char* password) {
 }
 
 wl_status_t WiFiClass::status() {
-  if (localIP() != IPAddress()) {
-    status_ = WL_CONNECTED;
-    if (mode_ == WIFI_OFF) mode_ = WIFI_STA;
-    return status_;
-  }
   if (mode_ != WIFI_STA && mode_ != WIFI_AP_STA) return status_;
   const std::string output = capture("wpa_cli -i wlan0 status 2>/dev/null");
-  if (output.find("wpa_state=COMPLETED") == std::string::npos) return status_ = WL_IDLE_STATUS;
+  if (output.find("wpa_state=COMPLETED") == std::string::npos) {
+    // A previous DHCP lease can survive a crashed or stopped supplicant.  It
+    // must never make the UI believe that station mode is live: that caused
+    // scans to preserve a dead connection and made joining a network fail.
+    if (localIP() != IPAddress()) run("ip addr flush dev wlan0 >/dev/null 2>&1");
+    dhcpAttempted_ = false;
+    return status_ = WL_IDLE_STATUS;
+  }
   if (!dhcpAttempted_) {
     dhcpAttempted_ = true;
     run("udhcpc -i wlan0 -n -q -t 4 -T 2 >/dev/null 2>&1");

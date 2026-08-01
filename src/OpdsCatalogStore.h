@@ -31,6 +31,9 @@ struct OpdsCatalogBook {
   std::string localPath;
   std::string coverBmpPath;
   OpdsCatalogAvailability availability = OpdsCatalogAvailability::RemoteOnly;
+  // A newer remote EPUB is available while the existing local copy remains
+  // readable. Clear only after its replacement is validated and published.
+  bool updateAvailable = false;
   // False only when the last complete server snapshot no longer contained the
   // title. Keep a locally downloaded EPUB visible/offline rather than silently
   // orphaning it; remote-only entries are removed instead.
@@ -65,6 +68,7 @@ class OpdsCatalogStore : public PersistableStore<OpdsCatalogStore> {
   static std::string serverKeyForIdentity(const std::string& serverIdentity);
   std::vector<OpdsCatalogBook> getBooksForServer(const std::string& serverIdentity) const;
   const OpdsCatalogBook* find(const std::string& serverIdentity, const std::string& entryId) const;
+  uint32_t snapshotGeneration() const { return latestSnapshotGeneration; }
 
   // Merge only book entries from one fetched feed. Existing local paths and
   // offline availability survive metadata refreshes; manually copied EPUBs
@@ -80,7 +84,10 @@ class OpdsCatalogStore : public PersistableStore<OpdsCatalogStore> {
   // point at a partial artifact.
   bool updateCoverBmpPath(const std::string& serverIdentity, const std::string& entryId,
                           const std::string& coverBmpPath);
-  bool reconcileLocalFiles();
+  // Re-associate stable downloader paths after an update and demote only
+  // records whose EPUB is truly absent. `persist=false` lets a snapshot save
+  // its reconciled state atomically in the caller's existing write.
+  bool reconcileLocalFiles(bool persist = true);
 };
 
 #define OPDS_CATALOG OpdsCatalogStore::getInstance()

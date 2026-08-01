@@ -43,6 +43,9 @@ class TouchUiRegistry final {
 
   static TouchUiRegistry& instance();
 
+  void beginFrame();
+  void commitFrame();
+  void invalidate();
   void clear();
   bool registerItem(int x, int y, int width, int height, int currentIndex, int targetIndex, int itemCount);
   bool registerDirect(int x, int y, int width, int height, TargetKind kind, int target, int secondaryTarget = 0,
@@ -63,8 +66,11 @@ class TouchUiRegistry final {
  private:
   [[nodiscard]] static bool intersects(const Region& first, const Region& second);
   std::array<Region, kMaxRegions> regions_{};
+  std::array<Region, kMaxRegions> stagingRegions_{};
   std::size_t count_ = 0;
+  std::size_t stagingCount_ = 0;
   std::uint32_t generation_ = 0;
+  bool frameBuilding_ = false;
 #ifdef KOBO_LINUX
   mutable std::mutex mutex_;
 #endif

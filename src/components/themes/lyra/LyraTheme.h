@@ -87,7 +87,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .textFieldNormalThickness = 1,
                                  .textFieldCursorThickness = 3,
                                  .textFieldLineEndOffset = 0};
-}
+}  // namespace LyraMetrics
 
 class LyraTheme : public BaseTheme {
  public:

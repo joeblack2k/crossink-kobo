@@ -4,7 +4,7 @@
 #
 ################################################################################
 
-CROSSINK_KOBO_APP_VERSION = 1.4.0-beta1
+CROSSINK_KOBO_APP_VERSION = 1.4.0-kobo-beta3
 CROSSINK_KOBO_APP_SITE = $(BR2_EXTERNAL_CROSSINK_KOBO_PATH)/../platform/kobo/app
 CROSSINK_KOBO_APP_SITE_METHOD = local
 CROSSINK_KOBO_APP_LICENSE = GPL-3.0-or-later

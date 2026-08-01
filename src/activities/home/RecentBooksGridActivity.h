@@ -47,6 +47,7 @@ class RecentBooksGridActivity final : public Activity {
   std::vector<BookState> recentBooks;
   std::string searchQuery;
   int loadedPageStart = NO_PAGE_LOADED;
+  uint32_t observedCatalogChangeSerial = 0;
   LibraryView view;
 
   void loadRecentBooks();

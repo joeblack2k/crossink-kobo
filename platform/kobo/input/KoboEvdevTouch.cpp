@@ -139,10 +139,16 @@ bool KoboEvdevTouch::open(const TouchDeviceInfo& device, TouchCalibration calibr
   transform_ = KoboTouchTransform(calibration);
   rawX_ = calibration.x.minimum;
   rawY_ = calibration.y.minimum;
+  down_ = false;
+  positionChanged_ = false;
+  discarding_ = false;
+  lastTimestampMicros_ = 0;
   if (!transform_.valid()) {
     close();
     return false;
   }
+  clockid_t clockId = CLOCK_MONOTONIC;
+  (void)evdevIoctl(fd_, EVIOCSCLOCKID, &clockId);
   return true;
 }
 
@@ -151,6 +157,10 @@ void KoboEvdevTouch::close() {
     ::close(fd_);
   }
   fd_ = -1;
+  down_ = false;
+  positionChanged_ = false;
+  discarding_ = false;
+  lastTimestampMicros_ = 0;
 }
 
 void KoboEvdevTouch::setOrientation(const ScreenOrientation orientation) { transform_.setOrientation(orientation); }
@@ -170,6 +180,12 @@ bool KoboEvdevTouch::readFrame(TouchFrame& frame) {
       return false;
     }
 
+    if (event.type == EV_SYN && event.code == SYN_DROPPED) {
+      down_ = false;
+      positionChanged_ = false;
+      discarding_ = true;
+      continue;
+    }
     if (event.type == EV_ABS) {
       const unsigned int xCode = device_.usesMultitouchAxes ? ABS_MT_POSITION_X : ABS_X;
       const unsigned int yCode = device_.usesMultitouchAxes ? ABS_MT_POSITION_Y : ABS_Y;
@@ -185,13 +201,25 @@ bool KoboEvdevTouch::readFrame(TouchFrame& frame) {
     } else if (event.type == EV_KEY && event.code == BTN_TOUCH) {
       down_ = event.value != 0;
     } else if (event.type == EV_SYN && event.code == SYN_REPORT) {
+      const bool discontinuity = discarding_;
+      discarding_ = false;
       frame.point = transform_.map(rawX_, rawY_);
       frame.rawPoint = {rawX_, rawY_};
-      frame.down = down_;
+      frame.down = discontinuity ? false : down_;
       frame.positionChanged = positionChanged_;
-      timespec now{};
-      clock_gettime(CLOCK_MONOTONIC, &now);
-      frame.timestampMicros = static_cast<std::uint64_t>(now.tv_sec) * 1'000'000ULL + now.tv_nsec / 1'000ULL;
+      frame.discontinuity = discontinuity;
+      const bool validTimestamp = event.seconds >= 0 && event.microseconds >= 0 && event.microseconds < 1'000'000;
+      const std::uint64_t eventTimestamp = validTimestamp ? static_cast<std::uint64_t>(event.seconds) * 1'000'000ULL +
+                                                                static_cast<std::uint64_t>(event.microseconds)
+                                                          : 0;
+      if (validTimestamp && eventTimestamp >= lastTimestampMicros_) {
+        frame.timestampMicros = eventTimestamp;
+      } else {
+        timespec now{};
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        frame.timestampMicros = static_cast<std::uint64_t>(now.tv_sec) * 1'000'000ULL + now.tv_nsec / 1'000ULL;
+      }
+      lastTimestampMicros_ = frame.timestampMicros;
       positionChanged_ = false;
       return true;
     }

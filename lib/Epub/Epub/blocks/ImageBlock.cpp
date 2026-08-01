@@ -136,8 +136,8 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   expectedWidth = cachedWidth;
   expectedHeight = cachedHeight;
 
-  LOG_DBG("IMG", "Cache render: %s source=%dx%d target=(%d,%d %dx%d) orientation=%d", cachePath.c_str(),
-          cachedWidth, cachedHeight, x, y, expectedWidth, expectedHeight, static_cast<int>(renderer.getOrientation()));
+  LOG_DBG("IMG", "Cache render: %s source=%dx%d target=(%d,%d %dx%d) orientation=%d", cachePath.c_str(), cachedWidth,
+          cachedHeight, x, y, expectedWidth, expectedHeight, static_cast<int>(renderer.getOrientation()));
 
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
@@ -200,7 +200,8 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   DirectPixelWriter pw;
   pw.init(renderer);
 
-  const size_t dataOffset = pixelcache::kHeaderSize + static_cast<size_t>(renderRowStart) * static_cast<size_t>(bytesPerRow);
+  const size_t dataOffset =
+      pixelcache::kHeaderSize + static_cast<size_t>(renderRowStart) * static_cast<size_t>(bytesPerRow);
   if (!cacheFile.seek(dataOffset)) {
     LOG_ERR("IMG", "Cache seek error at row %d", renderRowStart);
     free(readBuffer);

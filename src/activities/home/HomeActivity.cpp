@@ -1873,8 +1873,8 @@ void HomeActivity::render(RenderLock&&) {
   // touch user needs most. This keeps Settings visible at every scale.
   GUI.drawButtonHints(renderer, tr(STR_SETTINGS_TITLE), tr(STR_SELECT), "", "");
   const int settingsFrameTop = pageHeight - metrics.buttonHintsHeight;
-  TOUCH_UI.registerItem(0, settingsFrameTop, pageWidth / 2, metrics.buttonHintsHeight, 0,
-                        getMenuItemCount(), getMenuItemCount() + 1);
+  TOUCH_UI.registerItem(0, settingsFrameTop, pageWidth / 2, metrics.buttonHintsHeight, 0, getMenuItemCount(),
+                        getMenuItemCount() + 1);
 #else
   const bool isCarouselTheme =
       static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme) == CrossPointSettings::UI_THEME::LYRA_CAROUSEL;

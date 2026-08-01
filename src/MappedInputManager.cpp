@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <utility>
 
 #include "CrossPointSettings.h"
@@ -417,35 +418,48 @@ void MappedInputManager::clearInjectedInputFrame() {
   // are both injected before Activity::loop(); keeping an unconsumed target
   // for another frame could execute an action after the activity/modal that
   // published it has already changed.
-  injectedTouchTargetAvailable = false;
+  injectedTouchTargetHead = 0;
+  injectedTouchTargetCount = 0;
 }
 
 void MappedInputManager::injectTouchTarget(const unsigned char kind, const int primary, const int secondary,
                                            const std::uint32_t generation, const int x, const int y) {
-  injectedTouchTarget = {kind, primary, secondary, generation, x, y};
-  injectedTouchTargetAvailable = true;
+  if (injectedTouchTargetCount >= TOUCH_TARGET_QUEUE_CAPACITY) {
+    std::fprintf(stderr, "[KOBO] semantic touch target queue overflow; dropping newest target\n");
+    return;
+  }
+  const std::size_t slot = (injectedTouchTargetHead + injectedTouchTargetCount) % TOUCH_TARGET_QUEUE_CAPACITY;
+  injectedTouchTargets[slot] = {kind, primary, secondary, generation, x, y};
+  ++injectedTouchTargetCount;
 }
 
 bool MappedInputManager::consumeTouchTarget(TouchTarget& target) {
-  if (!injectedTouchTargetAvailable) return false;
-  target = injectedTouchTarget;
-  injectedTouchTargetAvailable = false;
+  if (injectedTouchTargetCount == 0) return false;
+  target = injectedTouchTargets[injectedTouchTargetHead];
+  injectedTouchTargetHead = (injectedTouchTargetHead + 1) % TOUCH_TARGET_QUEUE_CAPACITY;
+  --injectedTouchTargetCount;
   // A direct target represents one rendered visual state. Once an activity
   // acts on it, invalidate every remaining hitbox immediately rather than
   // waiting for the asynchronous e-ink render to begin. This closes the
   // interval in which a rapid second tap could resolve an old screen.
-  TOUCH_UI.clear();
+  if (target.generation != TOUCH_UI.generation()) return false;
+  TOUCH_UI.invalidate();
   return true;
 }
 
 bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& currentIndex) {
-  if (!injectedTouchTargetAvailable ||
-      injectedTouchTarget.kind != static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) return false;
-  targetIndex = injectedTouchTarget.primary;
-  currentIndex = injectedTouchTarget.secondary;
-  injectedTouchTargetAvailable = false;
+  if (injectedTouchTargetCount == 0 || injectedTouchTargets[injectedTouchTargetHead].kind !=
+                                           static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) {
+    return false;
+  }
+  const TouchTarget target = injectedTouchTargets[injectedTouchTargetHead];
+  injectedTouchTargetHead = (injectedTouchTargetHead + 1) % TOUCH_TARGET_QUEUE_CAPACITY;
+  --injectedTouchTargetCount;
+  targetIndex = target.primary;
+  currentIndex = target.secondary;
   // See consumeTouchTarget(): no second activation may use a previous render.
-  TOUCH_UI.clear();
+  if (target.generation != TOUCH_UI.generation()) return false;
+  TOUCH_UI.invalidate();
   return true;
 }
 #endif

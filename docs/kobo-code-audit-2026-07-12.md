@@ -17,7 +17,7 @@ in `kobo-feature-parity.md` en de testmatrix):
 - binary: `015acdf001cdf637db25453bcb2121d45f460392f82cb5e033b914d136bf6ccc`;
 - kernel: Linux 6.19.0;
 - runtime: ruim veertien uur actief, watchdog early-start-failures `0`;
-- netwerk tijdens audit: test-SSID, RSSI circa `-61 dBm`;
+- netwerk tijdens audit: SSID `Legacy`, RSSI circa `-61 dBm`;
 - ARM-platformtests: 6/6 PASS.
 
 ## Bevindingen
@@ -50,7 +50,7 @@ in `kobo-feature-parity.md` en de testmatrix):
 | A-12 | Apparaatinfo gebruikt deels hardcoded Engelse labels. | Onvolledige lokalisatie. | Routeer labels via vertalingen. |
 | A-13 | Oud bewijs is verspreid over meerdere binary-hashes. | Een regressie kan onopgemerkt blijven. | Draai één volledige Beta 1-regressie op exact dezelfde releasehash. |
 | A-14 | Suspend is bewust uitgeschakeld en nog niet veilig geaccepteerd. | Geen dagelijkse powerflow of boekcover-sleepscreen. | Pas als laatste onder USER GATE testen; tot dan dev-image wakker houden. |
-| A-15 | Gesigneerde updater, final USB-storage, secretscan en reproduceerbare final image ontbreken. | Geen veilig uitleverbare Beta 1. | Uitvoeren nadat functionaliteit stabiel is; lokale hardware-artifacts zijn niet onderdeel van deze publieke bronrepo. |
+| A-15 | Gesigneerde updater, final USB-storage, secretscan en reproduceerbare final image ontbreken. | Geen veilig uitleverbare Beta 1. | Uitvoeren nadat functionaliteit stabiel is; flash `/dev/disk5` uitsluitend na expliciete bevestiging. |
 
 ## Wat niet opnieuw geport moet worden
 

@@ -10,8 +10,8 @@
 #include "MappedInputManager.h"
 #include "components/TouchSlider.h"
 #include "components/UITheme.h"
-#include "platform/DeviceCapabilities.h"
 #include "fontIds.h"
+#include "platform/DeviceCapabilities.h"
 
 namespace {
 // Fine/coarse slider step sizes for percent adjustments.
@@ -39,6 +39,7 @@ void EpubReaderPercentSelectionActivity::adjustPercent(const int delta) {
 }
 
 void EpubReaderPercentSelectionActivity::loop() {
+  // cppcheck-suppress knownConditionTrueFalse
   if (TouchSlider::consume(mappedInput, 0, 100, percent)) {
     requestUpdate();
     return;

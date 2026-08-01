@@ -74,6 +74,8 @@ TouchDispatch KoboTouchGesture::update(const TouchFrame& frame, const TouchConte
   } else if (context != TouchContext::Reader && std::abs(deltaY) >= kSwipeDistance) {
     const TouchAction action = deltaY < 0 ? TouchAction::Down : TouchAction::Up;
     dispatch = {action, true, true, start_};
+  } else {
+    dispatch.action = TouchAction::Cancelled;
   }
   reset();
   return dispatch;

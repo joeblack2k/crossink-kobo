@@ -43,15 +43,15 @@ class RecentBooksStore : public PersistableStore<RecentBooksStore> {
   // Add a new book to the front, or refresh an existing entry and promote it
   // to the front.
   void addOrUpdateBook(const std::string& path, const std::string& title, const std::string& author,
-                       const std::string& coverBmpPath, const std::string& series = {}, const std::string& seriesIndex = {},
-                       const std::string& collection = {});
+                       const std::string& coverBmpPath, const std::string& series = {},
+                       const std::string& seriesIndex = {}, const std::string& collection = {});
 
   // updateBook updates metadata for an existing book only and must not change
   // recent-books ordering. Use addOrUpdateBook when the touched book should
   // become most recent. Returns false if the book does not exist.
   [[nodiscard]] bool updateBook(const std::string& path, const std::string& title, const std::string& author,
-                                const std::string& coverBmpPath, const std::string& series = {}, const std::string& seriesIndex = {},
-                                const std::string& collection = {});
+                                const std::string& coverBmpPath, const std::string& series = {},
+                                const std::string& seriesIndex = {}, const std::string& collection = {});
 
   // Remove the entry whose path matches (used when a book is removed from recents or finished/read).
   // Returns true if an entry was found and removed (no-op + false otherwise).

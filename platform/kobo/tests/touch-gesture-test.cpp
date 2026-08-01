@@ -48,6 +48,11 @@ int main() {
   expect(gesture.update(frame(500, 1000, false, 100'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
          true, true, "navigation lower item");
 
+  expect(gesture.update(frame(500, 500, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
+         false, false, "deadband down must wait");
+  expect(gesture.update(frame(525, 500, false, 100'000), TouchContext::Navigation, width, height),
+         TouchAction::Cancelled, false, false, "deadband must cancel explicitly");
+
   expect(gesture.update(frame(500, 900, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
          false, false, "vertical swipe down must wait");
   expect(gesture.update(frame(500, 700, false, 100'000), TouchContext::Navigation, width, height), TouchAction::Down,

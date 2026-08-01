@@ -1,5 +1,4 @@
 #include "KoboEvdevKey.h"
-#include "KoboEvdevAbi.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -11,6 +10,8 @@
 #include <cerrno>
 #include <climits>
 #include <cstring>
+
+#include "KoboEvdevAbi.h"
 
 namespace crossink::kobo {
 namespace {
@@ -45,10 +46,9 @@ bool KoboEvdevKey::discoverPowerKey(KeyDeviceInfo& result, const std::string& in
     if (fd < 0) continue;
     unsigned long eventBits[bitWords(EV_MAX)]{};
     unsigned long keyBits[bitWords(KEY_MAX)]{};
-    const bool supportsKeys = evdevIoctl(fd, EVIOCGBIT(0, sizeof(eventBits)), eventBits) >= 0 &&
-                              bitSet(eventBits, EV_KEY) &&
-                              evdevIoctl(fd, EVIOCGBIT(EV_KEY, sizeof(keyBits)), keyBits) >= 0 &&
-                              bitSet(keyBits, KEY_POWER);
+    const bool supportsKeys =
+        evdevIoctl(fd, EVIOCGBIT(0, sizeof(eventBits)), eventBits) >= 0 && bitSet(eventBits, EV_KEY) &&
+        evdevIoctl(fd, EVIOCGBIT(EV_KEY, sizeof(keyBits)), keyBits) >= 0 && bitSet(keyBits, KEY_POWER);
     if (supportsKeys) {
       char name[256]{};
       if (evdevIoctl(fd, EVIOCGNAME(sizeof(name)), name) < 0) std::strncpy(name, "unknown", sizeof(name) - 1);

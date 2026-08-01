@@ -38,8 +38,7 @@ void NearbyStatsSyncActivity::render(RenderLock&&) {
 #else
       StrId::STR_NEARBY_STATS_SIMULATOR_UNAVAILABLE;
 #endif
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, I18N.get(unavailable), true,
-                            EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, I18N.get(unavailable), true, EpdFontFamily::BOLD);
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();

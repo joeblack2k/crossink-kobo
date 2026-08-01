@@ -14,7 +14,9 @@ struct KoboSuspendProbe {
   std::string uptime;
 };
 
-struct KoboSuspendRequest { std::string eventContext; };
+struct KoboSuspendRequest {
+  std::string eventContext;
+};
 
 struct KoboSuspendResult {
   bool entered = false;

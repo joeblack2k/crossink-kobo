@@ -1,4 +1,4 @@
-## [Kobo Glo HD Beta 1] - Unreleased
+## [1.4.0-kobo-beta3] - Unreleased
 
 ### Added
 
@@ -11,6 +11,7 @@
 ### Changed
 
 - EPUB and TXT readers reserve the Kobo touch frame and use native high-density fonts and layout metrics when built for Kobo Linux.
+- Kobo Settings labels the qualified Safe/Fast/Max display scheduler control as `Display speed`, separate from normal page-refresh frequency.
 
 ### Fixed
 
@@ -23,6 +24,9 @@
 - Kobo touch routing now audits forbidden overlapping hit regions. Library modal
   panels clear the underlying grid targets, header actions stop at the tab
   boundary and the Home footer no longer overlaps the final menu row.
+- A missing N437 thermal telemetry source now forces any selected Fast or Max
+  display profile back to Safe with a full GC16 recovery instead of treating an
+  unknown temperature as safe.
 
 ## [v1.4.0] - 2026-07-10
 

@@ -58,15 +58,14 @@ struct KoboLibraryLayout final {
     // physical ratio avoids the blank right-hand strip produced by the
     // proportional one-bit renderer when a wide card frame was requested.
     const int coverWidth = std::min(cardWidth, coverHeight * 2 / 3);
-    return Rect{cardX + (cardWidth - coverWidth) / 2,
-                contentTop + row * (coverHeight + metadataHeight + rowGap), coverWidth, coverHeight};
+    return Rect{cardX + (cardWidth - coverWidth) / 2, contentTop + row * (coverHeight + metadataHeight + rowGap),
+                coverWidth, coverHeight};
   }
 
   [[nodiscard]] Rect cardRect(const int slot) const {
     const int row = slot / kColumns;
     const int column = slot % kColumns;
     return Rect{sidePadding + column * (cardWidth + columnGap),
-                contentTop + row * (coverHeight + metadataHeight + rowGap), cardWidth,
-                coverHeight + metadataHeight};
+                contentTop + row * (coverHeight + metadataHeight + rowGap), cardWidth, coverHeight + metadataHeight};
   }
 };

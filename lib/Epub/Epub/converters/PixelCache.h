@@ -128,9 +128,10 @@ struct PixelCache {
     const uint32_t magic = pixelcache::kMagic;
     const uint8_t version = pixelcache::kVersion;
     const uint8_t bitsPerPixel = pixelcache::kBitsPerPixel;
-    if (file.write(&magic, sizeof(magic)) != sizeof(magic) || file.write(&version, sizeof(version)) != sizeof(version) ||
-        file.write(&bitsPerPixel, sizeof(bitsPerPixel)) != sizeof(bitsPerPixel) || file.write(&w16, sizeof(w16)) != sizeof(w16) ||
-        file.write(&h16, sizeof(h16)) != sizeof(h16)) {
+    if (file.write(&magic, sizeof(magic)) != sizeof(magic) ||
+        file.write(&version, sizeof(version)) != sizeof(version) ||
+        file.write(&bitsPerPixel, sizeof(bitsPerPixel)) != sizeof(bitsPerPixel) ||
+        file.write(&w16, sizeof(w16)) != sizeof(w16) || file.write(&h16, sizeof(h16)) != sizeof(h16)) {
       LOG_ERR("IMG", "Failed to write cache header: %s", temporaryPathStr.c_str());
       abort();
       return false;

@@ -85,8 +85,10 @@ class MappedInputManager {
   std::array<bool, BUTTON_COUNT> injectedReleased{};
   std::array<bool, BUTTON_COUNT> injectedHeld{};
   std::array<unsigned long, BUTTON_COUNT> injectedPressStart{};
-  TouchTarget injectedTouchTarget{};
-  bool injectedTouchTargetAvailable = false;
+  static constexpr std::size_t TOUCH_TARGET_QUEUE_CAPACITY = 8;
+  std::array<TouchTarget, TOUCH_TARGET_QUEUE_CAPACITY> injectedTouchTargets{};
+  std::size_t injectedTouchTargetHead = 0;
+  std::size_t injectedTouchTargetCount = 0;
 #endif
 
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;

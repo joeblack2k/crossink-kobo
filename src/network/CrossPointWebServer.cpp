@@ -26,7 +26,6 @@
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
-#include "platform/DeviceCapabilities.h"
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
@@ -34,6 +33,7 @@
 #include "html/SettingsPageHtml.generated.h"
 #include "html/StyleCss.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#include "platform/DeviceCapabilities.h"
 #include "util/BookCacheUtils.h"
 #include "util/StringUtils.h"
 
@@ -73,6 +73,7 @@ uint8_t enumRawValueForDisplayIndex(const SettingInfo& setting, uint8_t displayI
 HalFile wsUploadFile;
 String wsUploadFileName;
 String wsUploadPath;
+String wsUploadTemporaryPath;
 size_t wsUploadSize = 0;
 size_t wsUploadReceived = 0;
 unsigned long wsUploadStartTime = 0;
@@ -135,6 +136,20 @@ bool isProtectedPath(const String& path) {
 CrossPointWebServer::CrossPointWebServer() {}
 
 CrossPointWebServer::~CrossPointWebServer() { stop(); }
+
+bool CrossPointWebServer::mutationAllowed() const {
+#ifdef KOBO_LINUX
+  const NetworkClient client = server->client();
+  const IPAddress remote = client.remoteIP();
+  // Kobo's mutating web API is USB-only by policy. Wi-Fi remains useful for
+  // read-only status/catalog access, but cannot alter device state or files.
+  if (remote[0] != 192 || remote[1] != 168 || remote[2] != 7) {
+    server->send(403, "text/plain", "Mutating operations require USB network access");
+    return false;
+  }
+#endif
+  return true;
+}
 
 void CrossPointWebServer::begin() {
   if (running) {
@@ -245,6 +260,9 @@ void CrossPointWebServer::begin() {
 
   server->begin();
 
+  // Kobo uses the transactional HTTP upload path. Do not expose the legacy
+  // unauthenticated WebSocket mutator on a network-facing Linux target.
+#ifndef KOBO_LINUX
   // Start WebSocket server for fast binary uploads
   LOG_DBG("WEB", "Starting WebSocket server on port %d...", wsPort);
   wsServer.reset(new WebSocketsServer(wsPort));
@@ -252,6 +270,7 @@ void CrossPointWebServer::begin() {
   wsServer->begin();
   wsServer->onEvent(wsEventCallback);
   LOG_DBG("WEB", "WebSocket server started");
+#endif
 
   udpActive = udp.begin(LOCAL_UDP_PORT);
   LOG_DBG("WEB", "Discovery UDP %s on port %d", udpActive ? "enabled" : "failed", LOCAL_UDP_PORT);
@@ -269,14 +288,12 @@ void CrossPointWebServer::begin() {
 void CrossPointWebServer::abortWsUpload(const char* tag) {
   // Explicit close() required: file-scope global persists beyond function scope
   wsUploadFile.close();
-  String filePath = wsUploadPath;
-  if (!filePath.endsWith("/")) filePath += "/";
-  filePath += wsUploadFileName;
-  if (Storage.remove(filePath.c_str())) {
-    LOG_DBG(tag, "Deleted incomplete upload: %s", filePath.c_str());
+  if (Storage.remove(wsUploadTemporaryPath.c_str())) {
+    LOG_DBG(tag, "Deleted incomplete upload: %s", wsUploadTemporaryPath.c_str());
   } else {
-    LOG_DBG(tag, "Failed to delete incomplete upload: %s", filePath.c_str());
+    LOG_DBG(tag, "Failed to delete incomplete upload: %s", wsUploadTemporaryPath.c_str());
   }
+  wsUploadTemporaryPath = "";
   wsUploadInProgress = false;
   wsUploadClientNum = 255;
   wsLastProgressSent = 0;
@@ -676,6 +693,7 @@ static bool flushUploadBuffer(CrossPointWebServer::UploadState& state) {
 }
 
 void CrossPointWebServer::handleUpload(UploadState& state) const {
+  if (!mutationAllowed()) return;
   static size_t lastLoggedSize = 0;
 
   // Reset watchdog at start of every upload callback - HTTP parsing can be slow
@@ -846,6 +864,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 }
 
 void CrossPointWebServer::handleUploadPost(UploadState& state) const {
+  if (!mutationAllowed()) return;
   if (state.success) {
     server->send(200, "text/plain", "File uploaded successfully: " + state.fileName);
   } else {
@@ -855,6 +874,7 @@ void CrossPointWebServer::handleUploadPost(UploadState& state) const {
 }
 
 void CrossPointWebServer::handleCreateFolder() const {
+  if (!mutationAllowed()) return;
   // Get folder name from form data
   if (!server->hasArg("name")) {
     server->send(400, "text/plain", "Missing folder name");
@@ -904,6 +924,7 @@ void CrossPointWebServer::handleCreateFolder() const {
 }
 
 void CrossPointWebServer::handleRename() const {
+  if (!mutationAllowed()) return;
   if (!server->hasArg("path") || !server->hasArg("name")) {
     server->send(400, "text/plain", "Missing path or new name");
     return;
@@ -983,6 +1004,7 @@ void CrossPointWebServer::handleRename() const {
 }
 
 void CrossPointWebServer::handleMove() const {
+  if (!mutationAllowed()) return;
   if (!server->hasArg("path") || !server->hasArg("dest")) {
     server->send(400, "text/plain", "Missing path or destination");
     return;
@@ -1074,6 +1096,7 @@ void CrossPointWebServer::handleMove() const {
 }
 
 void CrossPointWebServer::handleDelete() const {
+  if (!mutationAllowed()) return;
   // To ensure backwards compatibility, plain `path` is mapped
   // to a single element JSON array.
   bool hasPathArg = server->hasArg("path");
@@ -1276,6 +1299,7 @@ void CrossPointWebServer::handleGetSettings() const {
 }
 
 void CrossPointWebServer::handlePostSettings() {
+  if (!mutationAllowed()) return;
   if (!server->hasArg("plain")) {
     server->send(400, "text/plain", "Missing JSON body");
     return;
@@ -1396,6 +1420,7 @@ void CrossPointWebServer::handleGetOpdsServers() const {
 }
 
 void CrossPointWebServer::handlePostOpdsServer() {
+  if (!mutationAllowed()) return;
   if (!server->hasArg("plain")) {
     server->send(400, "text/plain", "Missing JSON body");
     return;
@@ -1467,6 +1492,7 @@ void CrossPointWebServer::handlePostOpdsServer() {
 
 // Uses POST (not HTTP DELETE) because ESP32 WebServer doesn't support DELETE with body.
 void CrossPointWebServer::handleDeleteOpdsServer() {
+  if (!mutationAllowed()) return;
   if (!server->hasArg("plain")) {
     server->send(400, "text/plain", "Missing JSON body");
     return;
@@ -1501,6 +1527,7 @@ void CrossPointWebServer::handleDeleteOpdsServer() {
 }
 
 void CrossPointWebServer::handleMakePrimaryOpdsServer() {
+  if (!mutationAllowed()) return;
   if (!server->hasArg("plain")) {
     server->send(400, "text/plain", "Missing JSON body");
     return;
@@ -1560,6 +1587,7 @@ void CrossPointWebServer::handleGetWifiNetworks() const {
 }
 
 void CrossPointWebServer::handlePostWifiNetwork() {
+  if (!mutationAllowed()) return;
   if (!server->hasArg("plain")) {
     server->send(400, "text/plain", "Missing JSON body");
     return;
@@ -1623,6 +1651,7 @@ void CrossPointWebServer::handlePostWifiNetwork() {
 
 // Uses POST (not HTTP DELETE) because ESP32 WebServer doesn't support DELETE with body.
 void CrossPointWebServer::handleDeleteWifiNetwork() {
+  if (!mutationAllowed()) return;
   if (!server->hasArg("plain")) {
     server->send(400, "text/plain", "Missing JSON body");
     return;
@@ -1721,6 +1750,13 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
           }
           wsUploadSize = sizeToken.toInt();
           wsUploadPath = normalizeWebPath(msg.substring(secondColon + 1));
+#ifdef KOBO_LINUX
+          wsUploadPath = "/Books";
+          if (!FsHelpers::hasEpubExtension(wsUploadFileName.c_str())) {
+            wsServer->sendTXT(num, "ERROR:Only EPUB files are accepted on Kobo");
+            return;
+          }
+#endif
           wsUploadReceived = 0;
           wsLastProgressSent = 0;
           wsUploadStartTime = millis();
@@ -1729,6 +1765,7 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
           String filePath = wsUploadPath;
           if (!filePath.endsWith("/")) filePath += "/";
           filePath += wsUploadFileName;
+          wsUploadTemporaryPath = filePath + ".part";
 
           if (isProtectedPath(filePath)) {
             wsServer->sendTXT(num, "ERROR:Access denied to protected path");
@@ -1740,15 +1777,14 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
           LOG_DBG("WS", "Starting upload: %s (%d bytes) to %s", wsUploadFileName.c_str(), wsUploadSize,
                   filePath.c_str());
 
-          // Check if file exists and remove it
+          // Stage in the same directory. The existing destination remains
+          // untouched until the complete stream has been synced and renamed.
           esp_task_wdt_reset();
-          if (Storage.exists(filePath.c_str())) {
-            Storage.remove(filePath.c_str());
-          }
+          if (Storage.exists(wsUploadTemporaryPath.c_str())) Storage.remove(wsUploadTemporaryPath.c_str());
 
           // Open file for writing
           esp_task_wdt_reset();
-          if (!Storage.openFileForWrite("WS", filePath, wsUploadFile)) {
+          if (!Storage.openFileForWrite("WS", wsUploadTemporaryPath, wsUploadFile)) {
             wsServer->sendTXT(num, "ERROR:Failed to create file");
             wsUploadInProgress = false;
             wsUploadClientNum = 255;
@@ -1760,6 +1796,13 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
           if (wsUploadSize == 0) {
             // Explicit close() required: file-scope global persists beyond function scope
             wsUploadFile.close();
+            if (!Storage.rename(wsUploadTemporaryPath.c_str(), filePath.c_str())) {
+              Storage.remove(wsUploadTemporaryPath.c_str());
+              wsUploadTemporaryPath = "";
+              wsServer->sendTXT(num, "ERROR:Failed to activate upload");
+              break;
+            }
+            wsUploadTemporaryPath = "";
             wsLastCompleteName = wsUploadFileName;
             wsLastCompleteSize = 0;
             wsLastCompleteAt = millis();
@@ -1814,8 +1857,23 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
 
       // Check if upload complete
       if (wsUploadReceived >= wsUploadSize) {
+        if (!wsUploadFile.sync()) {
+          wsUploadFile.close();
+          abortWsUpload("WS");
+          wsServer->sendTXT(num, "ERROR:Sync failed");
+          return;
+        }
         // Explicit close() required: file-scope global persists beyond function scope
         wsUploadFile.close();
+        String filePath = wsUploadPath;
+        if (!filePath.endsWith("/")) filePath += "/";
+        filePath += wsUploadFileName;
+        if (!Storage.rename(wsUploadTemporaryPath.c_str(), filePath.c_str())) {
+          abortWsUpload("WS");
+          wsServer->sendTXT(num, "ERROR:Failed to activate upload");
+          return;
+        }
+        wsUploadTemporaryPath = "";
         wsUploadInProgress = false;
         wsUploadClientNum = 255;
 
@@ -1830,9 +1888,6 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
                 elapsed, kbps);
 
         // Clear epub cache to prevent stale metadata issues when overwriting files
-        String filePath = wsUploadPath;
-        if (!filePath.endsWith("/")) filePath += "/";
-        filePath += wsUploadFileName;
         clearBookCachePreservingUserState(filePath.c_str());
 
         wsServer->sendTXT(num, "DONE");
@@ -1895,6 +1950,7 @@ void CrossPointWebServer::handleFontList() const {
 }
 
 void CrossPointWebServer::handleFontUploadData() {
+  if (!mutationAllowed()) return;
   HTTPUpload& upload = server->upload();
 
   switch (upload.status) {
@@ -1904,8 +1960,11 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.file = HalFile();
       fontUpload.familyName.clear();
       fontUpload.filePath.clear();
+      fontUpload.temporaryPath.clear();
       fontUpload.valid = false;
       fontUpload.magicChecked = false;
+      fontUpload.magicPrefix.fill(0);
+      fontUpload.magicBytes = 0;
       fontUpload.bytesWritten = 0;
       fontUpload.bufferPos = 0;
 
@@ -1937,9 +1996,11 @@ void CrossPointWebServer::handleFontUploadData() {
       char path[192];
       FontInstaller::buildFontPath(family.c_str(), filename.c_str(), path, sizeof(path));
       fontUpload.filePath = path;
+      fontUpload.temporaryPath = fontUpload.filePath + ".part";
+      Storage.remove(fontUpload.temporaryPath.c_str());
 
-      if (!Storage.openFileForWrite("WEB", path, fontUpload.file)) {
-        LOG_ERR("WEB", "Failed to open font file for write: %s", path);
+      if (!Storage.openFileForWrite("WEB", fontUpload.temporaryPath.c_str(), fontUpload.file)) {
+        LOG_ERR("WEB", "Failed to open font staging file for write: %s", fontUpload.temporaryPath.c_str());
         break;
       }
 
@@ -1952,9 +2013,14 @@ void CrossPointWebServer::handleFontUploadData() {
       if (!fontUpload.valid) break;
       esp_task_wdt_reset();
 
-      // Validate magic bytes on first chunk only
-      if (!fontUpload.magicChecked && upload.currentSize >= 8) {
-        if (memcmp(upload.buf, "CPFONT\0\0", 8) != 0) {
+      const size_t magicRemaining = fontUpload.magicPrefix.size() - fontUpload.magicBytes;
+      const size_t magicCopy = std::min(magicRemaining, upload.currentSize);
+      if (magicCopy > 0) {
+        memcpy(fontUpload.magicPrefix.data() + fontUpload.magicBytes, upload.buf, magicCopy);
+        fontUpload.magicBytes += magicCopy;
+      }
+      if (!fontUpload.magicChecked && fontUpload.magicBytes == fontUpload.magicPrefix.size()) {
+        if (memcmp(fontUpload.magicPrefix.data(), "CPFONT\0\0", fontUpload.magicPrefix.size()) != 0) {
           LOG_ERR("WEB", "Invalid .cpfont magic bytes");
           fontUpload.valid = false;
           break;
@@ -1974,8 +2040,12 @@ void CrossPointWebServer::handleFontUploadData() {
         remaining -= chunk;
 
         if (fontUpload.bufferPos >= FontUploadState::BUFFER_SIZE) {
-          fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
-          fontUpload.bytesWritten += fontUpload.bufferPos;
+          const size_t written = fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
+          if (written != fontUpload.bufferPos) {
+            fontUpload.valid = false;
+            break;
+          }
+          fontUpload.bytesWritten += written;
           fontUpload.bufferPos = 0;
           esp_task_wdt_reset();
         }
@@ -1986,16 +2056,22 @@ void CrossPointWebServer::handleFontUploadData() {
     case UPLOAD_FILE_END: {
       // Flush remaining buffer
       if (fontUpload.valid && fontUpload.bufferPos > 0) {
-        fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
-        fontUpload.bytesWritten += fontUpload.bufferPos;
+        const size_t written = fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
+        if (written != fontUpload.bufferPos) fontUpload.valid = false;
+        fontUpload.bytesWritten += written;
         fontUpload.bufferPos = 0;
       }
+      if (fontUpload.valid && fontUpload.magicBytes < fontUpload.magicPrefix.size()) fontUpload.valid = false;
+      if (fontUpload.valid && !fontUpload.file.sync()) fontUpload.valid = false;
       if (fontUpload.file.isOpen()) {
         fontUpload.file.close();
       }
 
-      if (!fontUpload.valid && !fontUpload.filePath.empty()) {
-        Storage.remove(fontUpload.filePath.c_str());
+      if (fontUpload.valid && !Storage.rename(fontUpload.temporaryPath.c_str(), fontUpload.filePath.c_str())) {
+        fontUpload.valid = false;
+      }
+      if (!fontUpload.valid && !fontUpload.temporaryPath.empty()) {
+        Storage.remove(fontUpload.temporaryPath.c_str());
       }
 
       LOG_DBG("WEB", "Font upload end: valid=%d, %zu bytes", fontUpload.valid, fontUpload.bytesWritten);
@@ -2006,8 +2082,8 @@ void CrossPointWebServer::handleFontUploadData() {
       if (fontUpload.file) {
         fontUpload.file.close();
       }
-      if (!fontUpload.filePath.empty()) {
-        Storage.remove(fontUpload.filePath.c_str());
+      if (!fontUpload.temporaryPath.empty()) {
+        Storage.remove(fontUpload.temporaryPath.c_str());
       }
       fontUpload.valid = false;
       LOG_DBG("WEB", "Font upload aborted");
@@ -2017,6 +2093,7 @@ void CrossPointWebServer::handleFontUploadData() {
 }
 
 void CrossPointWebServer::handleFontUpload() {
+  if (!mutationAllowed()) return;
   if (fontUpload.valid) {
     sdFontSystem.markRegistryDirty();
     server->send(200, "application/json", "{\"ok\":true}");
@@ -2027,6 +2104,7 @@ void CrossPointWebServer::handleFontUpload() {
 }
 
 void CrossPointWebServer::handleFontDelete() {
+  if (!mutationAllowed()) return;
   String body = server->arg("plain");
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, body);

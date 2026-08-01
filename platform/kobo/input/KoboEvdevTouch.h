@@ -21,6 +21,7 @@ struct TouchFrame {
   bool positionChanged = false;
   std::uint64_t timestampMicros = 0;
   TouchPoint rawPoint;
+  bool discontinuity = false;
 };
 
 class KoboEvdevTouch {
@@ -49,6 +50,8 @@ class KoboEvdevTouch {
   std::int32_t rawY_ = 0;
   bool down_ = false;
   bool positionChanged_ = false;
+  bool discarding_ = false;
+  std::uint64_t lastTimestampMicros_ = 0;
 };
 
 }  // namespace crossink::kobo

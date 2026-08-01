@@ -51,9 +51,7 @@ class OpdsBookBrowserActivity final : public Activity {
   uint64_t activeJobId = 0;
   std::optional<OpdsEntry> activeDownloadBook;
   std::string activeDownloadPath;
-  std::vector<OpdsEntry> bulkQueue;
-  size_t bulkIndex = 0;
-  bool bulkRunning = false;
+  std::string activeDownloadTemporaryPath;
 
   OpdsServer server;  // Copied at construction — safe even if the store changes during browsing
   std::optional<OpdsEntry> directDownload;
@@ -73,8 +71,6 @@ class OpdsBookBrowserActivity final : public Activity {
   void navigateToEntry(const OpdsEntry& entry);
   void navigateBack();
   void downloadBook(const OpdsEntry& book);
-  void startBulkSyncIfEnabled();
-  void downloadNextBulkBook();
   void launchSearch();
   void performSearch(const std::string& query);
   [[nodiscard]] int visibleItemCount() const;

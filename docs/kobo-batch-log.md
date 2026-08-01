@@ -681,3 +681,180 @@ krijgt pas `PASS` na ARM-build, atomaire deploy en gericht N437-bewijs.
   een volledig schone vendorcheckout en lege Buildroot-output. Het doel is een
   verifieerbare bronboom en een route-smoke; er wordt geen bestaande Kobo- of
   gebruikerdata gewijzigd.
+
+- **Eind 2026-07-13T16:01Z — PASS:** de schone bundle checkout op
+  `1320c41e` bleef volledig schoon, de acht gegenereerde webheaders waren in
+  twee opeenvolgende runs byte-stabiel en de lege Buildroot-output bouwde de
+  ARM-binary `dcfa5af…94858`. De binary is atomair op de N437 geactiveerd;
+  Home, status, settingsmetadata en een live EPUB-upload plus verwijdering
+  via de portal zijn bewezen. Interne Home-capture en watchdog 0 zijn
+  opgeslagen onder `artifacts/kobo/hardware/platform-portal-repro/plat02-1320c41e/`.
+
+## B-032 — DISP-03 Fast-kwalificatie
+
+- **Start 2026-07-13T16:03Z:** audit eerst de bestaande refreshscheduler,
+  drivercapabilities en benchmarkharnas. Geen Fast-/GC4-/A2-profiel wordt
+  ingesteld en geen CPUfreq, spanning, VCOM, waveformblob, PLL of clocktree
+  wordt gewijzigd voordat de echte N437-driveracceptatie is bewezen.
+- **DNF 2026-07-13T16:48Z:** gedeelde N437-target was niet exclusief. Externe
+  `crossink-kobo-display-smoke`-jobs wisselden release-/DRM-eigendom tijdens
+  de reeks; één Fast-1000-run bleef in kernel-I/O zonder exitrecord. Safe
+  1/10/100/1000 en Fast 1/10/100 zijn wel gearchiveerd, maar GC16-herstel,
+  Fast-1000 en fysieke ghosting zijn hierdoor niet valideerbaar. Zie
+  `artifacts/kobo/hardware/display-fast-qualification/20260713T1632Z-38f70244/`.
+
+## B-033 — DISP-04 profielguard voor device-instellingen
+
+- **Start 2026-07-13T17:02Z:** audit en herstel de Safe/Fast/Max (beta)-
+  profielgrens. De app mag zonder een werkende N437-temperatuurmeting geen
+  sneller profiel presenteren; CPUFreq blijft beperkt tot de door de kernel
+  aangeboden OPP's. Geen hardware- of waveforminstellingen worden aangepast.
+- **DNF 2026-07-13T19:06Z:** hosttests en ARMv7/musl-syntaxchecks zijn groen,
+  maar twee externe Buildroot-rebuilds startten herhaald op hetzelfde
+  `output-kobo-arm`. De eerste appbuild eindigde door externe `SIGHUP`; de
+  veilige retry botste meteen met een nieuwe platformrebuild. Geen gemengde
+  ARM-binary is gedeployed; zie `dnr.md` voor de concrete herstartvoorwaarde.
+- **Vervolg 2026-07-13T19:17Z:** een daarna exclusief afgeronde ARM-build van
+  dezelfde geïsoleerde bronset leverde `c94a3997…7189e`; ELF-, string- en
+  SHA-256-controles bevestigen de thermal fail-safe. De N437 draait exact die
+  binary in `dev-display-hold-20260713T191500Z-c94a3997`. Dit verandert de
+  DNF-status niet: de vereiste fysieke profiel-/fallbackproef ontbreekt nog.
+
+## B-034 — DISP-05 N437-fallbackkwalificatie
+
+- **DNF 2026-07-13T19:08Z:** geen valide DISP-04 ARM-release beschikbaar door
+  herhaalde concurrente Buildroot-output. De profiel-/foutinjectietest zou op
+  een andere binary geen bewijs leveren; geen targetdisplaytest of deployment
+  uitgevoerd. Safe/`ondemand` zijn read-only gecontroleerd en blijven actief.
+- **Vervolg 2026-07-13T19:17Z:** de correcte DISP-04-binary is inmiddels wel
+  actief op de N437, maar zonder exclusieve DRM-proef, gecontroleerde
+  foutinjectie en Photo Booth-validatie is DISP-05 nog steeds terecht DNF.
+
+## B-035 — DISP-04 touchprofielen en fysieke N437-soak
+
+- **Vervolg 2026-07-13T19:30Z:** de exclusieve N437-test is op
+  `dev-display-hold2-20260713T191500Z-c94a3997` uitgevoerd. Fast en Max (beta)
+  doorliepen elk 1000 gemengde DU/GC16-updates met een 60 s DRM-hold voor een
+  levende Photo Booth-controle. Geen ioctl-fout of submitdeadline; Fast had
+  p50/p95 18.811/276.512 ms en Max 18.261/276.380 ms. Beide liepen tijdelijk
+  op de bestaande 996 MHz OPP, herstelden naar `ondemand` en bleven onder
+  58,2 °C. De eigen hash-/kernel-/modelmarkers zijn pas na die hold geschreven.
+- **Device-UX:** `Display speed` opent direct een aanraakpicker. Fast en Max
+  (beta - experimental) zijn pas na hun eigen marker zichtbaar; Max is kort
+  gekozen en de reader is daarna teruggezet op Safe. Zie
+  `artifacts/kobo/hardware/display/20260713T191500Z/`.
+# B-036 — OPDS offline-library batch (OPDS-05 t/m OPDS-10)
+
+- Start: 2026-07-13 UTC.
+- Scope: één samenhangende batch voor remote/local coverjobs, device-side Sync
+  All, volledige achtergrondcatalogusrefresh, atomische/resumeerbare EPUB
+  downloads, headerstatus en de bijbehorende foutpaden.
+- Buildbeleid: geen tussentijdse ARM-deploy. Eerst de hele batch, daarna snelle
+  hostchecks, één ARM-build, atomische deploy en N437-validatie.
+- Tussenbewijs 2026-07-13T22:00Z: host-native check en de eerste ARM-batch
+  waren groen. De eerste N437-runde bracht één reëel defect aan het licht:
+  gedownloade catalogusboeken met een progressieve JPEG als embedded cover
+  bleven leeg, terwijl de OPDS-cover beschikbaar was. De daaropvolgende
+  correctiebatch bleef beperkt tot de coverfallback, globale coverjob-drain en
+  refresh-dedupe; geen andere subsystemen zijn tussentijds gedeployed.
+- Actieve kandidaat: `dev-opds-coverfix-20260713T220000Z-43aac7f4`, SHA-256
+  `43aac7f4bde51968bffbf66b7a327b473082b536e791bd845835207fa1d62537`.
+  De echte N437 haalt zes zichtbare OPDS-covers op, publiceert ze atomair en
+  laadt vijf verdere covers terwijl Home zichtbaar is. Interne captures,
+  Photo-Booth-foto en app-log staan onder
+  `artifacts/kobo/hardware/opds-batch/20260713T212604Z/cover-worker-fix/`.
+  Device-toggle is via touch Off→On getest en bleef na re-exec `true`.
+  Meerpagina-, fout-, resume- en offlineproeven zijn nog open; B-036 is dus
+  nadrukkelijk geen PASS.
+- Vervolg 2026-07-13T23:55Z: een gecontroleerde 55-items/multipage-fixture
+  bevestigde eerst de bootvolgorde (catalogusrefresh vóór Sync All), maar
+  legde bij direct Pause→Resume een echte race bloot: het asynchrone
+  cancelresultaat werd na Resume als downloadfout verwerkt. De volgende
+  **ongebouwde** correctiebatch bundelt die race met de overeenkomstige
+  catalogus-cancelstatus, terminale storage-queuefoutafhandeling en stabiele
+  OPDS-bestandsnamen. Host-native check is PASS; geen ARM-build of deploy
+  volgt totdat deze samenhangende batch compleet is.
+- Vervolg 2026-07-13T22:30Z: de volledige vijfpunten-correctiebatch bouwde
+  als één incrementele ARM-appbuild (bestaande waarschuwingen buiten de batch;
+  geen fout), SHA-256 `30fe46f82c6483f70665604a286a60ecec019e8eb0854f2175a97f28dc70d33a`.
+  Deploy was atomair naar
+  `dev-opds-resume-20260713T223000Z-30fe46f8`; de vorige release bleef de
+  rollback. De 55-books-fixture voltooide zonder crash of resterende `.part`.
+  De snelle geautomatiseerde tikproef raakte daarna een andere
+  settingsnavigatieroute dan de Pause/Resume-control; die specifieke
+  acceptatieproef is daarom bewust nog niet als PASS aangemerkt. De echte
+  OPDS-server/catalogus (40 items) en alle fixturebestanden zijn vervolgens
+  hersteld/verwijderd.
+
+## B-037 — OPDS-05 progressive-cover correctie en acceptatie-audit
+
+- **Start 2026-07-14T00:00Z:** audit van de echte primaire catalogus op de
+  N437-release `30fe46f8…`. De `BOOKS`-tab laadt 40 catalogusentries en de
+  fysieke Pearl-capture toont de zichtbare remote kaarten. De audit bevestigt
+  echter dat de oude 1-bit thumbnailroute SOF2/progressieve JPEG-covers nog
+  expliciet afwees (`Skipping progressive JPEG on Kobo`), terwijl de reader
+  daarvoor al een begrensde veilige decoder bezit. De batch introduceert één
+  afzonderlijke, begrensde progressive-thumbnailmodule voor die coverroute;
+  de overige OPDS-05..10 acceptatiegevallen volgen samen vóór de eerstvolgende
+  ARM-build/deploy.
+- **Batch-gate 2026-07-14T00:20Z:** de kandidaat bundelt vijf compatibele
+  OPDS-05-correcties vóór de eerstvolgende targetbuild: (1) SOF2/progressive
+  JPEG via de begrensde readerdecoder, (2) 16 MiB cover-bronlimiet, (3) alle
+  cataloguskaarten als lage-prioriteit single-flight coverqueue in plaats van
+  uitsluitend de zichtbare pagina, (4) verwijdering van ongeldige source/
+  `.part`-artefacten vóór backoff-herstel, en (5) de expliciete deviceactie
+  `Retry failed cover downloads`. Snelle hostchecks volgen; geen tussentijdse
+  ARM-deploy per afzonderlijke correctie.
+
+## B-038 — OPDS-resultaatdrain na 55-kaartentest
+
+- **Start 2026-07-14T00:35Z:** de eerste N437-fixture op de B-037-binary
+  bewees de veilige progressive decode (`16x24 -> 300x450`) en 54/55
+  coverdownloads, maar legde een correctness-fout bloot: `OpdsSyncService`
+  verwijderde na 16 resultaten stille jobcompletions en `OpdsCoverCache`
+  beperkte kaartwijzigingen tot 24. Daardoor konden vroege kaarten leeg
+  blijven terwijl hun BMP al bestond. De normale serverconfiguratie is direct
+  hersteld; de fixture is verwijderd.
+- **Correctiebatch (drie ondeelbare queue-invarianten):** behoud ieder
+  jobresultaat tot de eigenaar het consumeert, behoud iedere coverwijziging
+  tot de grid die consumeert, en actualiseer zowel gefilterde als ongesorteerde
+  kaartstate bij een ready-resultaat. Dit is bewust een minimale driepunten-
+  batch volgens de buildregel: deze producer/consumer-invariant moet op de
+  echte target opnieuw bewezen worden voordat verder OPDS-werk veilig is.
+- **N437-herproef 2026-07-14T00:40Z — PASS voor de queue-invariant:** de
+  atomair geactiveerde release
+  `dev-opds-cover-b038-20260714T004000Z-329e9532` met SHA-256
+  `329e95324d2971d7cba62fef991b82972d78954d79856e069926f836b42235c6`
+  verwerkte de fixture met 55 catalogusitems. Resultaat: 55 gevalideerde
+  EPUB's, 54 BMP-covers én 54 gepubliceerde `coverBmpPath`-waarden; entry 55
+  is de opzettelijke 404. De log bevat de safe SOF2-regel
+  `Progressive thumbnail safe decode 16x24 -> 300x450`. Er waren geen
+  `.part`-bestanden of crashcountertoenames. De primaire 40-item HomeLab
+  catalogus, serverconfiguratie en alle fixturebestanden op de Kobo zijn
+  vervolgens teruggezet/verwijderd. OPDS-05..10 blijven open totdat de
+  volledige fout-, offline-, UI-retry- en fysieke Photo-Booth-matrix is
+  vastgelegd.
+- **Fysieke vervolgcontrole 2026-07-14T00:50Z:** na de restore queue'te de
+  normale 40-item HomeLab-catalogus alle ontbrekende covers opnieuw. Interne
+  capture toont 40 BMP's/40 cataloguspaden; de live Photo-Booth-capture toont
+  dezelfde zes fysieke covers zonder lege kaarten of zichtbare ghost-restanten.
+
+## B-039 — OPDS-08 t/m OPDS-10 catalogus-/offline-invariantbatch
+
+- **Start 2026-07-14T01:50Z:** één gecombineerde batch voor de resterende
+  OPDS-fase. Geen tussentijdse ARM-build of deploy: eerst de gezamenlijke
+  correctnesswijzigingen en hostchecks, daarna één targetbuild en één N437-
+  matrixrun.
+- **Aanleiding:** de normale 40-itemcatalogus meldde 40 offline records, maar
+  slechts 39 daadwerkelijke EPUB-bestanden. Oude catalogusrecords droegen een
+  ongesuffixeerde padnaam, terwijl de downloader inmiddels een stabiele
+  ID-suffix gebruikt. Daardoor kon een geldige lokale kopie ten onrechte als
+  remote of een ontbrekende kopie ten onrechte als offline worden behandeld.
+- **Geplande ondeelbare correcties:** (1) één gedeelde
+  `OpdsBookStorage`-padcontract voor browser en achtergrondworker, (2)
+  stabiele-padmigratie vóór legacy-rootfallback, (3) atomische reconcile in
+  snapshotvervanging, (4) controle dat `AvailableOffline` alleen na een echt
+  EPUB-pad mag worden opgeslagen, (5) pre-queue reconcile zodat handmatig
+  verwijderde EPUB's in dezelfde Sync All-generatie terugkomen, (6) directe
+  browserdownload gebruikt dezelfde padidentiteit, en (7) een gerichte
+  hosttest voor formaat, sanitizing en deterministische suffixen.

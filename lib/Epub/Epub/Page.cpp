@@ -403,9 +403,8 @@ bool Page::fitSingleImageToViewport(const uint16_t viewportWidth, const uint16_t
   image.setDisplaySize(static_cast<int16_t>(width), static_cast<int16_t>(height));
   pageImage.xPos = static_cast<int16_t>((viewportWidth - width) / 2);
   pageImage.yPos = static_cast<int16_t>((viewportHeight - height) / 2);
-  LOG_DBG("PGE", "Full-page image %s source=%dx%d viewport=%ux%u target=(%d,%d %dx%d)",
-          image.getImagePath().c_str(), source.width, source.height, viewportWidth, viewportHeight, pageImage.xPos,
-          pageImage.yPos, width, height);
+  LOG_DBG("PGE", "Full-page image %s source=%dx%d viewport=%ux%u target=(%d,%d %dx%d)", image.getImagePath().c_str(),
+          source.width, source.height, viewportWidth, viewportHeight, pageImage.xPos, pageImage.yPos, width, height);
   return true;
 }
 

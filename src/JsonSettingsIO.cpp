@@ -108,8 +108,8 @@ bool writeJsonAtomically(const char* module, const char* path, const JsonDocumen
   if (!complete) {
     output.close();
     Storage.remove(temporaryPath.c_str());
-    LOG_ERR(module, "Failed to sync JSON temporary file: %s (%u/%u bytes)", path,
-            static_cast<unsigned>(written), static_cast<unsigned>(expected));
+    LOG_ERR(module, "Failed to sync JSON temporary file: %s (%u/%u bytes)", path, static_cast<unsigned>(written),
+            static_cast<unsigned>(expected));
     return false;
   }
   if (!Storage.rename(temporaryPath.c_str(), path)) {

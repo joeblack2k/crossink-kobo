@@ -7,10 +7,42 @@ TouchUiRegistry& TouchUiRegistry::instance() {
   return registry;
 }
 
+void TouchUiRegistry::beginFrame() {
+#ifdef KOBO_LINUX
+  const std::lock_guard<std::mutex> lock(mutex_);
+#endif
+  stagingCount_ = 0;
+  frameBuilding_ = true;
+}
+
+void TouchUiRegistry::commitFrame() {
+#ifdef KOBO_LINUX
+  const std::lock_guard<std::mutex> lock(mutex_);
+#endif
+  if (!frameBuilding_) return;
+  regions_ = stagingRegions_;
+  count_ = stagingCount_;
+  ++generation_;
+  frameBuilding_ = false;
+}
+
+void TouchUiRegistry::invalidate() {
+#ifdef KOBO_LINUX
+  const std::lock_guard<std::mutex> lock(mutex_);
+#endif
+  count_ = 0;
+  stagingCount_ = 0;
+  ++generation_;
+}
+
 void TouchUiRegistry::clear() {
 #ifdef KOBO_LINUX
   const std::lock_guard<std::mutex> lock(mutex_);
 #endif
+  if (frameBuilding_) {
+    stagingCount_ = 0;
+    return;
+  }
   count_ = 0;
   ++generation_;
 }
@@ -20,12 +52,13 @@ bool TouchUiRegistry::registerItem(const int x, const int y, const int width, co
 #ifdef KOBO_LINUX
   const std::lock_guard<std::mutex> lock(mutex_);
 #endif
-  if (count_ >= regions_.size() || width <= 0 || height <= 0 || itemCount <= 0 || currentIndex < -1 ||
+  auto& regions = frameBuilding_ ? stagingRegions_ : regions_;
+  auto& count = frameBuilding_ ? stagingCount_ : count_;
+  if (count >= regions.size() || width <= 0 || height <= 0 || itemCount <= 0 || currentIndex < -1 ||
       currentIndex >= itemCount || targetIndex < 0 || targetIndex >= itemCount) {
     return false;
   }
-  regions_[count_++] = {x, y,    width, height, currentIndex, targetIndex, itemCount, TargetKind::NavigationItem,
-                        0, false};
+  regions[count++] = {x, y, width, height, currentIndex, targetIndex, itemCount, TargetKind::NavigationItem, 0, false};
   return true;
 }
 
@@ -34,8 +67,10 @@ bool TouchUiRegistry::registerDirect(const int x, const int y, const int width, 
 #ifdef KOBO_LINUX
   const std::lock_guard<std::mutex> lock(mutex_);
 #endif
-  if (count_ >= regions_.size() || width <= 0 || height <= 0 || kind == TargetKind::NavigationItem) return false;
-  regions_[count_++] = {x, y, width, height, 0, target, 0, kind, secondaryTarget, overlapAllowed};
+  auto& regions = frameBuilding_ ? stagingRegions_ : regions_;
+  auto& count = frameBuilding_ ? stagingCount_ : count_;
+  if (count >= regions.size() || width <= 0 || height <= 0 || kind == TargetKind::NavigationItem) return false;
+  regions[count++] = {x, y, width, height, 0, target, 0, kind, secondaryTarget, overlapAllowed};
   return true;
 }
 

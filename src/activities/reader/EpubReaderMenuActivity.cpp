@@ -4,7 +4,10 @@
 #include <I18n.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 
 #include "ClippingStore.h"
 #include "CrossPointSettings.h"
@@ -31,6 +34,16 @@ constexpr int selectedTabBoxHeight = 34;
 constexpr int selectedTabBoxRadius = 2;
 constexpr int kFrontlightStepPercent = 10;
 constexpr int kFrontlightSegmentCount = 11;  // 0%, 10%, … 100%
+constexpr int kFontSliderKind = 1;
+constexpr int kFrontlightSliderKind = 0;
+// The normal 14 pt Kobo default is deliberately at 30%, leaving much more
+// room above it for readers who need large type.  Positions are based on
+// physical point size, not the legacy persistence ordering.
+constexpr std::array<CrossPointSettings::FONT_SIZE, 8> kFontSizeOrder = {
+    CrossPointSettings::TEENSY,      CrossPointSettings::ITTY_BITTY, CrossPointSettings::TINY,
+    CrossPointSettings::SMALL,       CrossPointSettings::MEDIUM,     CrossPointSettings::LARGE,
+    CrossPointSettings::EXTRA_LARGE, CrossPointSettings::HUGE_SIZE};
+constexpr std::array<int, 8> kFontSizePositions = {0, 8, 16, 24, 30, 55, 75, 100};
 
 uint8_t normalizeFrontlightStep(const int percent) {
   const int clamped = std::clamp(percent, 0, 100);
@@ -38,13 +51,13 @@ uint8_t normalizeFrontlightStep(const int percent) {
                               kFrontlightStepPercent);
 }
 
-struct FrontlightSliderLayout {
+struct SliderLayout {
   Rect panel;
   Rect track;
 };
 
-FrontlightSliderLayout frontlightSliderLayout(const GfxRenderer& renderer, const ThemeMetrics& metrics,
-                                              const Rect& screen) {
+SliderLayout sliderLayout(const GfxRenderer& renderer, const ThemeMetrics& metrics, const Rect& screen,
+                          const int bottomEdge) {
   const int labelHeight = renderer.getLineHeight(UI_10_FONT_ID);
   // Eleven horizontal 10%-segments cannot each be 9 mm wide on this panel,
   // so make the shared vertical target deliberately generous instead.  The
@@ -54,10 +67,66 @@ FrontlightSliderLayout frontlightSliderLayout(const GfxRenderer& renderer, const
   const int panelHeight = labelHeight + trackHeight + metrics.verticalSpacing + 12;
   const int footerClearance = std::max(24, metrics.verticalSpacing * 2);
   const int panelX = screen.x + metrics.contentSidePadding;
-  const int panelY = std::max(screen.y, screen.y + screen.height - footerClearance - panelHeight);
+  const int panelY = std::max(screen.y, bottomEdge - footerClearance - panelHeight);
   return {Rect{panelX, panelY, screen.width - metrics.contentSidePadding * 2, panelHeight},
           Rect{panelX, panelY + labelHeight + metrics.verticalSpacing / 2,
                screen.width - metrics.contentSidePadding * 2, trackHeight}};
+}
+
+SliderLayout frontlightSliderLayout(const GfxRenderer& renderer, const ThemeMetrics& metrics, const Rect& screen) {
+  return sliderLayout(renderer, metrics, screen, screen.y + screen.height);
+}
+
+SliderLayout fontSliderLayout(const GfxRenderer& renderer, const ThemeMetrics& metrics, const Rect& screen,
+                              const SliderLayout& frontlight) {
+  return sliderLayout(renderer, metrics, screen, frontlight.panel.y - metrics.verticalSpacing);
+}
+
+int fontSliderPosition() {
+  const auto current = SETTINGS.getEffectiveReaderFontSize();
+  for (size_t index = 0; index < kFontSizeOrder.size(); ++index) {
+    if (current == kFontSizeOrder[index]) return kFontSizePositions[index];
+  }
+  return 30;
+}
+
+uint8_t fontSizeForSliderPosition(const int position) {
+  int bestIndex = 0;
+  int bestDistance = std::numeric_limits<int>::max();
+  for (size_t index = 0; index < kFontSizeOrder.size(); ++index) {
+    const uint8_t stored = CrossPointSettings::getStoredReaderFontSize(kFontSizeOrder[index]);
+    if (stored == UINT8_MAX) continue;
+    const int distance = std::abs(kFontSizePositions[index] - position);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = static_cast<int>(index);
+    }
+  }
+  return CrossPointSettings::getStoredReaderFontSize(kFontSizeOrder[bestIndex]);
+}
+
+void drawSegmentedSlider(const GfxRenderer& renderer, const SliderLayout& slider, const int percent,
+                         const int secondaryTarget) {
+  constexpr int segmentGap = 4;
+  const int segmentWidth =
+      std::max(1, (slider.track.width - segmentGap * (kFrontlightSegmentCount - 1)) / kFrontlightSegmentCount);
+  const int renderedTrackWidth = segmentWidth * kFrontlightSegmentCount + segmentGap * (kFrontlightSegmentCount - 1);
+  for (int step = 0; step < kFrontlightSegmentCount; ++step) {
+    const int x = slider.track.x + step * (segmentWidth + segmentGap);
+    const int value = step * kFrontlightStepPercent;
+    const bool active = percent >= value;
+    renderer.fillRoundedRect(x, slider.track.y, segmentWidth, slider.track.height, 2,
+                             active ? Color::Black : Color::White);
+    renderer.drawRoundedRect(x, slider.track.y, segmentWidth, slider.track.height, 1, 2, true, true, true, true, true);
+#ifdef KOBO_LINUX
+    TOUCH_UI.registerDirect(x, slider.track.y, segmentWidth, slider.track.height, TouchUiRegistry::TargetKind::Slider,
+                            value, secondaryTarget);
+#endif
+  }
+  if (renderedTrackWidth < slider.track.width) {
+    renderer.drawLine(slider.track.x + renderedTrackWidth, slider.track.y, slider.track.x + renderedTrackWidth,
+                      slider.track.y + slider.track.height - 1, true);
+  }
 }
 
 struct ReaderLayoutSettingsSnapshot {
@@ -215,7 +284,7 @@ EpubReaderMenuActivity::TabMenuItems EpubReaderMenuActivity::buildMenuItems(bool
   if (hasFootnotes) {
     mainItems.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
   }
-  mainItems.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
+  mainItems.push_back({MenuAction::SEARCH_BY_LINE, StrId::STR_SEARCH, "Search by line"});
   mainItems.push_back({MenuAction::READER_OPTIONS, StrId::STR_READER_OPTIONS});
   mainItems.push_back({MenuAction::CONTROLS_OPTIONS, StrId::STR_CAT_CONTROLS});
   mainItems.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
@@ -349,10 +418,23 @@ void EpubReaderMenuActivity::loop() {
   if (mappedInput.consumeTouchTarget(touchTarget)) {
 #ifdef KOBO_LINUX
     if (touchTarget.kind == static_cast<unsigned char>(TouchUiRegistry::TargetKind::Slider)) {
-      const uint8_t snapped = normalizeFrontlightStep(touchTarget.primary);
-      if (SETTINGS.frontlightBrightness != snapped) {
-        SETTINGS.frontlightBrightness = snapped;
-        SETTINGS.saveToFile();
+      if (touchTarget.secondary == kFontSliderKind) {
+        const uint8_t fontSize = fontSizeForSliderPosition(touchTarget.primary);
+        if (fontSize != UINT8_MAX && SETTINGS.fontSize != fontSize) {
+          SETTINGS.fontSize = fontSize;
+          settingsChanged = true;
+          if (saveReaderSettingsCallback != nullptr) {
+            saveReaderSettingsCallback(saveReaderSettingsContext);
+          } else {
+            SETTINGS.saveToFile();
+          }
+        }
+      } else {
+        const uint8_t snapped = normalizeFrontlightStep(touchTarget.primary);
+        if (SETTINGS.frontlightBrightness != snapped) {
+          SETTINGS.frontlightBrightness = snapped;
+          SETTINGS.saveToFile();
+        }
       }
       requestUpdate();
       return;
@@ -501,7 +583,8 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
       screen.y + metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight * 2 + metrics.verticalSpacing;
 #ifdef KOBO_LINUX
   const auto frontlight = frontlightSliderLayout(renderer, metrics, screen);
-  const int contentHeight = std::max(0, frontlight.panel.y - contentTop - metrics.verticalSpacing);
+  const auto fontSize = fontSliderLayout(renderer, metrics, screen, frontlight);
+  const int contentHeight = std::max(0, fontSize.panel.y - contentTop - metrics.verticalSpacing);
 #else
   const int contentHeight = std::max(0, screen.y + screen.height - contentTop);
 #endif
@@ -509,7 +592,10 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
 
   GUI.drawList(
       renderer, Rect{screen.x, contentTop, screen.width, contentHeight}, items.size(), selectedIndex,
-      [&items](int index) { return I18N.get(items[index].labelId); }, nullptr, nullptr,
+      [&items](int index) {
+        return items[index].customLabel ? items[index].customLabel : I18N.get(items[index].labelId);
+      },
+      nullptr, nullptr,
       [this](int index) -> std::string {
         const auto& items = activeMenuItems();
         if (index < 0 || index >= static_cast<int>(items.size())) {
@@ -529,37 +615,18 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
       true);
 
 #ifdef KOBO_LINUX
+  const std::string fontLabel = "Font size: " + std::to_string(fontSliderPosition()) + "%";
+  renderer.drawText(UI_10_FONT_ID, fontSize.panel.x, fontSize.panel.y, fontLabel.c_str(), true, EpdFontFamily::BOLD);
+  drawSegmentedSlider(renderer, fontSize, fontSliderPosition(), kFontSliderKind);
+
   // The reader menu is the only screen that a Kobo user is guaranteed to have
   // open while reading, so expose a large direct frontlight control here
-  // rather than sending them through nested Settings. Each segment owns its
-  // exact paint and touch rect; values are deliberately limited to 10% steps.
+  // rather than sending them through nested Settings.
   const std::string frontlightLabel =
       std::string(tr(STR_FRONTLIGHT)) + ": " + std::to_string(SETTINGS.frontlightBrightness) + "%";
   renderer.drawText(UI_10_FONT_ID, frontlight.panel.x, frontlight.panel.y, frontlightLabel.c_str(), true,
                     EpdFontFamily::BOLD);
-  constexpr int segmentGap = 4;
-  const int segmentWidth =
-      std::max(1, (frontlight.track.width - segmentGap * (kFrontlightSegmentCount - 1)) / kFrontlightSegmentCount);
-  const int renderedTrackWidth = segmentWidth * kFrontlightSegmentCount + segmentGap * (kFrontlightSegmentCount - 1);
-  for (int step = 0; step < kFrontlightSegmentCount; ++step) {
-    const int x = frontlight.track.x + step * (segmentWidth + segmentGap);
-    const int value = step * kFrontlightStepPercent;
-    const bool active = SETTINGS.frontlightBrightness >= value;
-    renderer.fillRoundedRect(x, frontlight.track.y, segmentWidth, frontlight.track.height, 2,
-                             active ? Color::Black : Color::White);
-    renderer.drawRoundedRect(x, frontlight.track.y, segmentWidth, frontlight.track.height, 1, 2, true, true, true, true,
-                             true);
-#ifdef KOBO_LINUX
-    TOUCH_UI.registerDirect(x, frontlight.track.y, segmentWidth, frontlight.track.height,
-                            TouchUiRegistry::TargetKind::Slider, value);
-#endif
-  }
-  // Keep the bar's outer edge explicit when integer segment widths leave a
-  // few pixels unused at 100–250% density.
-  if (renderedTrackWidth < frontlight.track.width) {
-    renderer.drawLine(frontlight.track.x + renderedTrackWidth, frontlight.track.y,
-                      frontlight.track.x + renderedTrackWidth, frontlight.track.y + frontlight.track.height - 1, true);
-  }
+  drawSegmentedSlider(renderer, frontlight, SETTINGS.frontlightBrightness, kFrontlightSliderKind);
 #endif
 
   // Footer / Hints

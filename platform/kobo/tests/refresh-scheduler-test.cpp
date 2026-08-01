@@ -89,9 +89,9 @@ int main() {
   KoboRefreshScheduler maxScheduler(width, height);
   if (!maxScheduler.select(RefreshProfile::MaxBeta, true)) fail("max soak pass selection");
   const auto maxFallback = maxScheduler.recordFailure(0, true, false);
-  if (maxFallback.to != RefreshProfile::Fast || maxScheduler.profile() != RefreshProfile::Fast ||
+  if (maxFallback.to != RefreshProfile::Safe || maxScheduler.profile() != RefreshProfile::Safe ||
       maxFallback.reason != std::string_view("deadline")) {
-    fail("max must degrade to fast with reason");
+    fail("max must degrade to safe with reason");
   }
   return 0;
 }

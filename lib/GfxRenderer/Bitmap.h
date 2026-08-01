@@ -75,9 +75,7 @@ class Bitmap {
   bool hasGreyscale() const { return bpp > 1; }
   int getRowBytes() const { return rowBytes; }
   uint32_t getPixelDataOffset() const { return bfOffBits; }
-  uint64_t getRequiredPixelDataSize() const {
-    return static_cast<uint64_t>(rowBytes) * static_cast<uint64_t>(height);
-  }
+  uint64_t getRequiredPixelDataSize() const { return static_cast<uint64_t>(rowBytes) * static_cast<uint64_t>(height); }
   bool is1Bit() const { return bpp == 1; }
   uint16_t getBpp() const { return bpp; }
 

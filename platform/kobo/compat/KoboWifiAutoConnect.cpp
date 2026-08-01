@@ -12,11 +12,13 @@ namespace crossink::kobo {
 namespace {
 constexpr unsigned long kInitialRetryMs = 15'000;
 constexpr unsigned long kMaximumRetryMs = 5UL * 60UL * 1000UL;
+constexpr unsigned long kServiceIntervalMs = 500;
 
 bool initialized = false;
 bool wasConnected = false;
 bool suspended = false;
 unsigned long nextAttemptAt = 0;
+unsigned long nextServiceAt = 0;
 unsigned long retryDelayMs = kInitialRetryMs;
 std::string configuredSsid;
 
@@ -24,8 +26,9 @@ void startSavedNetwork(const WifiCredential& credential) {
   WiFi.persistent(false);
   WiFi.setAutoReconnect(true);
   WiFi.mode(WIFI_STA);
-  const wl_status_t result = credential.password.empty() ? WiFi.begin(credential.ssid.c_str())
-                                                           : WiFi.begin(credential.ssid.c_str(), credential.password.c_str());
+  const wl_status_t result = credential.password.empty()
+                                 ? WiFi.begin(credential.ssid.c_str())
+                                 : WiFi.begin(credential.ssid.c_str(), credential.password.c_str());
   configuredSsid = credential.ssid;
   nextAttemptAt = millis() + retryDelayMs;
   LOG_INF("WIFI", "Kobo saved-network connect started: ssid=%s result=%d retry=%lums", configuredSsid.c_str(),
@@ -45,6 +48,9 @@ void initializeWifiAutoConnect() {
 
 bool serviceWifiAutoConnect() {
   if (!initialized) initializeWifiAutoConnect();
+  const unsigned long now = millis();
+  if (now < nextServiceAt) return false;
+  nextServiceAt = now + kServiceIntervalMs;
 
   const bool connected = WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
   bool changed = connected != wasConnected;

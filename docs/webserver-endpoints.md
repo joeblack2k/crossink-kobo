@@ -345,7 +345,7 @@ If `password` is omitted during an update, the existing password is preserved.
 ```bash
 curl -X POST \
   -H "Content-Type: application/json" \
-  -d '{"name":"My Catalog","url":"http://calibre.local:8080/opds","username":"<your-username>","password":"<your-password>"}' \
+  -d '{"name":"My Catalog","url":"http://calibre.local:8080/opds","username":"reader","password":"secret"}' \
   http://crosspoint.local/api/opds
 ```
 
@@ -392,7 +392,7 @@ preserved.
 ```bash
 curl -X POST \
   -H "Content-Type: application/json" \
-  -d '{"ssid":"<your-ssid>","password":"<your-password>"}' \
+  -d '{"ssid":"HomeWiFi","password":"secret"}' \
   http://crosspoint.local/api/wifi
 ```
 

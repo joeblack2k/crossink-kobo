@@ -48,7 +48,7 @@ bool KoboRefreshExecutor::present(KoboDrmDisplay& drm, KoboFbInkDisplay& fbink, 
   if (packed == nullptr || packedSize != kFrameBytes) return false;
   const auto dirty = KoboDirtyRegion::diff(lastPresented_.data(), packed, packedSize, KoboFbInkDisplay::kPanelWidth,
                                            KoboFbInkDisplay::kPanelHeight, havePresented_);
-  const auto decision = scheduler_.schedule(requested, dirty, soakPassed);
+  auto decision = scheduler_.schedule(requested, dirty, soakPassed);
   lastTelemetry_ = {.decision = decision};
   if (decision.skip) {
     std::fprintf(stderr, "[KOBO][EPD] profile=%s requested=%s skip=unchanged\n", refreshProfileName(decision.profile),
@@ -56,9 +56,27 @@ bool KoboRefreshExecutor::present(KoboDrmDisplay& drm, KoboFbInkDisplay& fbink, 
     return true;
   }
 
+  // Fast and Max (beta) use the existing kernel OPP only while their thermal
+  // guard is observable.  A missing sensor must never be interpreted as a
+  // cool panel: fail closed to the proven Safe profile and perform the normal
+  // full GC16 recovery before accepting another frame.
+  const int preflightTemperature = readSocTemperatureMilliC();
+  if (decision.profile != RefreshProfile::Safe && preflightTemperature < 0) {
+    const auto fallback = scheduler_.recordFailure(0, false, true);
+    decision.profile = fallback.to;
+    decision.waveform = RefreshKind::Full;
+    decision.region = KoboDirtyRegion::full(KoboFbInkDisplay::kPanelWidth, KoboFbInkDisplay::kPanelHeight, packedSize);
+    decision.forcedFull = true;
+    decision.requestCpuBoost = false;
+    lastTelemetry_.decision = decision;
+    lastTelemetry_.temperatureBeforeMilliC = preflightTemperature;
+    lastTelemetry_.fallbackAttempted = fallback.requiresRecoveryFull;
+    std::fprintf(stderr, "[KOBO][EPD] thermal telemetry unavailable; forced Safe GC16 recovery\n");
+  }
+
   KoboCpuFreqGuard cpuBoost;
   lastTelemetry_.cpuBoosted = decision.requestCpuBoost && cpuBoost.beginPerformanceBoost();
-  lastTelemetry_.temperatureBeforeMilliC = readSocTemperatureMilliC();
+  lastTelemetry_.temperatureBeforeMilliC = preflightTemperature;
   const auto started = std::chrono::steady_clock::now();
   const bool success = presentBackend(drm, fbink, useDrm, packed, packedSize, decision.waveform, decision.region);
   lastTelemetry_.submitMicros =

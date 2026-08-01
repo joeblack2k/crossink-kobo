@@ -43,6 +43,7 @@ std::string EndOfBookOptions::fullPath(const size_t index) const {
 
 EndOfBookOptions::Action EndOfBookOptions::handleMenuInput(MappedInputManager& input, std::string* openPath) {
   const int itemCount = static_cast<int>(names.size()) + 1;  // + "Home" entry
+  // cppcheck-suppress knownConditionTrueFalse
   if (consumeDirectListTarget(input, itemCount, selector)) {
     if (selector < static_cast<int>(names.size())) {
       if (openPath) *openPath = fullPath(selector);

@@ -1,8 +1,8 @@
 #include "ButtonNavigator.h"
 
-#include <algorithm>
-
 #include <Arduino.h>
+
+#include <algorithm>
 
 const MappedInputManager* ButtonNavigator::mappedInput = nullptr;
 
