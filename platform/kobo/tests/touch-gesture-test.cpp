@@ -8,6 +8,7 @@ using crossink::kobo::TouchAction;
 using crossink::kobo::TouchContext;
 using crossink::kobo::TouchDispatch;
 using crossink::kobo::TouchFrame;
+using crossink::kobo::TouchGesture;
 
 namespace {
 
@@ -24,6 +25,10 @@ void expect(const TouchDispatch dispatch, const TouchAction action, const bool p
   if (dispatch.action != action || dispatch.press != press || dispatch.release != release) {
     fail(label);
   }
+}
+
+void expectGesture(const TouchDispatch dispatch, const TouchGesture gesture, const char* label) {
+  if (dispatch.gesture != gesture) fail(label);
 }
 
 TouchFrame frame(const int x, const int y, const bool down, const std::uint64_t timestamp) {
@@ -73,11 +78,14 @@ int main() {
   expect(gesture.update(frame(300, 500, false, 100'000), TouchContext::Reader, width, height), TouchAction::PageForward,
          true, true, "left swipe advances");
 
-  expect(gesture.update(frame(100, 500, true, 1'000), TouchContext::Reader, width, height), TouchAction::None, false,
-         false, "long down must wait");
-  expect(gesture.update(frame(100, 500, true, 700'000), TouchContext::Reader, width, height), TouchAction::PageBack,
-         true, false, "long press starts hold");
-  expect(gesture.update(frame(100, 500, false, 800'000), TouchContext::Reader, width, height), TouchAction::PageBack,
-         false, true, "long press releases hold");
+  const auto longDown = gesture.update(frame(100, 500, true, 1'000), TouchContext::Reader, width, height);
+  expect(longDown, TouchAction::PageBack, false, false, "long down must wait");
+  expectGesture(longDown, TouchGesture::Start, "touchdown must start provisional hold");
+  const auto longStart = gesture.update(frame(100, 500, true, 700'000), TouchContext::Reader, width, height);
+  expect(longStart, TouchAction::PageBack, true, false, "long press starts hold");
+  expectGesture(longStart, TouchGesture::LongPressStart, "long press start gesture");
+  const auto longEnd = gesture.update(frame(100, 500, false, 800'000), TouchContext::Reader, width, height);
+  expect(longEnd, TouchAction::PageBack, false, true, "long press releases hold");
+  expectGesture(longEnd, TouchGesture::LongPressEnd, "long press end gesture");
   return EXIT_SUCCESS;
 }

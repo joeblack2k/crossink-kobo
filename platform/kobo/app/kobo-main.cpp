@@ -46,6 +46,8 @@ crossink::kobo::TouchFrame lastTouchFrame{};
 bool haveTouchFrame = false;
 TouchUiRegistry::Resolution capturedTouchTarget{};
 bool hasCapturedTouchTarget = false;
+MappedInputManager::Button provisionalLongPressButton = MappedInputManager::Button::Confirm;
+bool hasProvisionalLongPressButton = false;
 crossink::kobo::KoboFrontlightSysfs frontlight;
 int appliedFrontlight = -1;
 int appliedOrientation = -1;
@@ -177,13 +179,43 @@ MappedInputManager::Button mappedButton(const crossink::kobo::TouchAction action
 }
 
 void dispatch(const crossink::kobo::TouchDispatch event) {
+  using TouchGesture = crossink::kobo::TouchGesture;
+  const bool targetAction = event.action == crossink::kobo::TouchAction::UiItem ||
+                            event.action == crossink::kobo::TouchAction::Confirm ||
+                            event.action == crossink::kobo::TouchAction::Back;
+
+  if (event.gesture == TouchGesture::Start && targetAction) {
+    const auto target = hasCapturedTouchTarget && capturedTouchTarget.generation == TOUCH_UI.generation()
+                            ? capturedTouchTarget
+                            : TOUCH_UI.resolve(event.point.x, event.point.y);
+    if (target.found) {
+      provisionalLongPressButton = event.action == crossink::kobo::TouchAction::Back
+                                       ? MappedInputManager::Button::Back
+                                       : MappedInputManager::Button::Confirm;
+      mappedInputManager.injectPress(provisionalLongPressButton);
+      hasProvisionalLongPressButton = true;
+    }
+    return;
+  }
+
+  if (event.gesture == TouchGesture::Tap && hasProvisionalLongPressButton) {
+    mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+  } else if (event.gesture == TouchGesture::LongPressEnd && hasProvisionalLongPressButton) {
+    mappedInputManager.injectRelease(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+    hasCapturedTouchTarget = false;
+    return;
+  } else if ((event.gesture == TouchGesture::Swipe || event.gesture == TouchGesture::Cancelled) &&
+             hasProvisionalLongPressButton) {
+    mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+  }
+
   if (event.action == crossink::kobo::TouchAction::None || event.action == crossink::kobo::TouchAction::Cancelled) {
     return;
   }
 
-  const auto targetAction = event.action == crossink::kobo::TouchAction::UiItem ||
-                            event.action == crossink::kobo::TouchAction::Confirm ||
-                            event.action == crossink::kobo::TouchAction::Back;
   // A renderer-published hitbox is the authoritative action for the pixels
   // the user touched. In particular, Home places Settings in the left half
   // of the permanent bottom frame; the generic gesture mapper calls that

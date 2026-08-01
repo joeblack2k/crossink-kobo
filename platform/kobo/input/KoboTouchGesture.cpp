@@ -37,7 +37,7 @@ TouchDispatch KoboTouchGesture::update(const TouchFrame& frame, const TouchConte
     latest_ = frame.point;
     startedAt_ = frame.timestampMicros;
     heldAction_ = TouchAction::None;
-    return {};
+    return {actionAt(start_, context, screenWidth, screenHeight), false, false, start_, TouchGesture::Start};
   }
   if (!active_) {
     return {};
@@ -54,7 +54,7 @@ TouchDispatch KoboTouchGesture::update(const TouchFrame& frame, const TouchConte
       heldAction_ = actionAt(start_, context, screenWidth, screenHeight);
       if (heldAction_ != TouchAction::None) {
         longPressActive_ = true;
-        return {heldAction_, true, false, start_};
+        return {heldAction_, true, false, start_, TouchGesture::LongPressStart};
       }
     }
     return {};
@@ -62,20 +62,21 @@ TouchDispatch KoboTouchGesture::update(const TouchFrame& frame, const TouchConte
 
   TouchDispatch dispatch{};
   if (longPressActive_) {
-    dispatch = {heldAction_, false, true, start_};
+    dispatch = {heldAction_, false, true, start_, TouchGesture::LongPressEnd};
   } else if (withinTapSlop) {
     const TouchAction action = actionAt(start_, context, screenWidth, screenHeight);
-    dispatch = {action, action != TouchAction::None, action != TouchAction::None, start_};
+    dispatch = {action, action != TouchAction::None, action != TouchAction::None, start_, TouchGesture::Tap};
   } else if (std::abs(deltaX) >= kSwipeDistance && std::abs(deltaX) > std::abs(deltaY)) {
     const TouchAction action = context == TouchContext::Reader
                                    ? (deltaX < 0 ? TouchAction::PageForward : TouchAction::PageBack)
                                    : (deltaX < 0 ? TouchAction::Right : TouchAction::Left);
-    dispatch = {action, true, true, start_};
+    dispatch = {action, true, true, start_, TouchGesture::Swipe};
   } else if (context != TouchContext::Reader && std::abs(deltaY) >= kSwipeDistance) {
     const TouchAction action = deltaY < 0 ? TouchAction::Down : TouchAction::Up;
-    dispatch = {action, true, true, start_};
+    dispatch = {action, true, true, start_, TouchGesture::Swipe};
   } else {
     dispatch.action = TouchAction::Cancelled;
+    dispatch.gesture = TouchGesture::Cancelled;
   }
   reset();
   return dispatch;
