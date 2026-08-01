@@ -55,7 +55,7 @@ ci_apply=
 | TCH-07 | FIXED_LOCAL | 59cf1d50, 4fe51abe | `crossink-kobo-evdev-touch` PASS in GitHub run `30715081795` | ARM/N437 timestamp evidence ontbreekt | Kernel event timestamps are now preferred; the host parser test proves timestamp preservation and monotone fallback path coverage remains hardware-dependent. |
 | TCH-08 | FIXED_LOCAL | 59cf1d50, 4fe51abe | `crossink-kobo-evdev-touch` PASS in GitHub run `30715081795` | N437 drop/resync evidence ontbreekt | Host eventstream proves `SYN_DROPPED` emits discontinuity and subsequent touch frames recover; physical device-loss/reconnect evidence remains open. |
 | TCH-09 | FIXED_LOCAL | 5d601a89 | GitHub Actions run `30716861535` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format; EOF/device-loss assertion in evdev test | N437 unplug/reconnect evidence ontbreekt | Typed read results distinguish idle queue, EINTR, resync, device loss and protocol failure; the Kobo loop resets gesture state and retries discovery/open with a 500 ms bound. |
-| TCH-10 | IN_PROGRESS | 795d20b7, 39bd97cb | GitHub Actions run `30717054689` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format; bursttest ontbreekt | N437 rapid-tap evidence ontbreekt | The 8-entry FIFO now survives frame boundaries and is explicitly cleared on activity transition/suspend; newest overflow is still logged and dropped. A focused queue bursttest remains open. |
+| TCH-10 | FIXED_LOCAL | 795d20b7, 39bd97cb, 92045ae1, 97579923 | GitHub Actions run `30717384832` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format; bounded FIFO test PASS | N437 rapid-tap evidence ontbreekt | The 8-entry FIFO now survives frame boundaries, preserves FIFO order, rejects the ninth target, and is explicitly cleared on activity transition/suspend; newest overflow is still logged and dropped. |
 | NET-01 | IN_PROGRESS | afc4e3b2 | source review; latency test not available on macOS | N437 timing evidence ontbreekt | Background saved-network service is rate-limited to 500 ms; `iw` scan and DHCP failure/latency tests remain open. |
 | WEB-01 | IN_PROGRESS | d0c28537 | source inspection only; no negative HTTP/WebDAV authorization tests yet | N437 exposure test ontbreekt | Kobo mutating HTTP/WebDAV requests now require the documented USB subnet; WebSocket mutators are not started on Kobo. Token/pairing is not implemented, so broader interface audit remains open. |
 | WEB-02 | FIXED_LOCAL | d0c28537 | source-level atomic staging; failure-injection tests still required | N437 abort/disk-full test ontbreekt | HTTP, WebSocket, font and WebDAV PUT paths stage in same directory and do not remove the prior destination before activation. |
@@ -103,7 +103,7 @@ remaining_risk=Activity-instance-ID is vervangen door generation invalidation; d
 ### Fase 2 — semantische touch en gestures
 
 ```text
-status=IN_PROGRESS
+status=FIXED_LOCAL
 root_cause=Release-point resolution allowed a swipe starting over a target to activate a different target; 25-71 px movement disappeared silently.
 implementation=Touchdown captures the committed target generation; non-target navigation actions clear capture. Gesture deadband emits explicit Cancelled. Activity transitions invalidate the registry.
 tests=Standalone clang++ gesture test PASS with deadband case. Full CMake gesture target is blocked on macOS missing linux/input.h; raw routing E2E still missing.
@@ -227,10 +227,10 @@ remaining_risk=De eerste fysieke reconnect en eventuele driver-specifieke protoc
 status=IN_PROGRESS
 root_cause=clearInjectedInputFrame() verwijderde ongeconsumeerde semantic touch targets op iedere framegrens, waardoor snelle taps over meerdere main-loopframes verloren konden gaan.
 implementation=39bd97cb laat de begrensde FIFO over framegrenzen bestaan en voegt expliciete clearing toe bij activitytransition, suspend en nieuwe activity-entry.
-tests=GitHub Actions run 30717054689: Kobo host, CTest, dependency-audit, cppcheck en clang-format PASS; een queue-specifieke burst/overflowtest is nog niet toegevoegd.
+tests=GitHub Actions run 30717384832: Kobo host, CTest, dependency-audit, cppcheck en clang-format PASS; bounded FIFO test bewijst FIFO-volgorde, capaciteit 8, overflowafwijzing en leeg gedrag.
 hardware=Niet uitgevoerd; N437 rapid-tap evidence blijft open.
-commit=39bd97cb
-remaining_risk=De FIFO-capaciteit en overflowvolgorde moeten nog met een gerichte standalone test worden bewezen.
+commit=97579923
+remaining_risk=De fysieke rapid-tap-afhandeling en eventuele device-specifieke timing moeten nog op de echte N437 worden bevestigd.
 ```
 
 ## Commitlog
