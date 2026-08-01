@@ -74,9 +74,12 @@ void ActivityManager::renderTaskLoop() {
     if (currentActivity) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
 #ifdef KOBO_LINUX
-      TOUCH_UI.clear();
+      TOUCH_UI.beginFrame();
 #endif
       currentActivity->render(std::move(lock));
+#ifdef KOBO_LINUX
+      TOUCH_UI.commitFrame();
+#endif
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
 #if defined(KOBO_LINUX)

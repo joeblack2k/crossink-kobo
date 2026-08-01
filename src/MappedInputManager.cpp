@@ -434,7 +434,8 @@ bool MappedInputManager::consumeTouchTarget(TouchTarget& target) {
   // acts on it, invalidate every remaining hitbox immediately rather than
   // waiting for the asynchronous e-ink render to begin. This closes the
   // interval in which a rapid second tap could resolve an old screen.
-  TOUCH_UI.clear();
+  if (target.generation != TOUCH_UI.generation()) return false;
+  TOUCH_UI.invalidate();
   return true;
 }
 
@@ -445,7 +446,11 @@ bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& cur
   currentIndex = injectedTouchTarget.secondary;
   injectedTouchTargetAvailable = false;
   // See consumeTouchTarget(): no second activation may use a previous render.
-  TOUCH_UI.clear();
+  if (injectedTouchTarget.generation != TOUCH_UI.generation()) {
+    injectedTouchTargetAvailable = false;
+    return false;
+  }
+  TOUCH_UI.invalidate();
   return true;
 }
 #endif
