@@ -39,41 +39,41 @@ TouchFrame frame(const int x, const int y, const bool down, const std::uint64_t 
 
 int main() {
   KoboTouchGesture gesture;
-  expect(gesture.update(frame(100, 1400, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
+  expect(gesture.update(frame(100, 1400, true, 1'000), TouchContext::Navigation, width, height), TouchAction::Back,
          false, false, "down must wait");
   expect(gesture.update(frame(100, 1400, false, 100'000), TouchContext::Navigation, width, height), TouchAction::Back,
          true, true, "bottom left navigation");
 
-  expect(gesture.update(frame(500, 300, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
+  expect(gesture.update(frame(500, 300, true, 1'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
          false, false, "navigation upper down must wait");
   expect(gesture.update(frame(500, 300, false, 100'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
          true, true, "navigation upper item");
-  expect(gesture.update(frame(500, 1000, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
+  expect(gesture.update(frame(500, 1000, true, 1'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
          false, false, "navigation lower down must wait");
   expect(gesture.update(frame(500, 1000, false, 100'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
          true, true, "navigation lower item");
 
-  expect(gesture.update(frame(500, 500, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
+  expect(gesture.update(frame(500, 500, true, 1'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
          false, false, "deadband down must wait");
   expect(gesture.update(frame(525, 500, false, 100'000), TouchContext::Navigation, width, height),
          TouchAction::Cancelled, false, false, "deadband must cancel explicitly");
 
-  expect(gesture.update(frame(500, 900, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
+  expect(gesture.update(frame(500, 900, true, 1'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
          false, false, "vertical swipe down must wait");
   expect(gesture.update(frame(500, 700, false, 100'000), TouchContext::Navigation, width, height), TouchAction::Down,
          true, true, "upward swipe advances focus");
 
-  expect(gesture.update(frame(700, 500, true, 1'000), TouchContext::Navigation, width, height), TouchAction::None,
+  expect(gesture.update(frame(700, 500, true, 1'000), TouchContext::Navigation, width, height), TouchAction::UiItem,
          false, false, "horizontal navigation swipe down must wait");
   expect(gesture.update(frame(450, 500, false, 100'000), TouchContext::Navigation, width, height), TouchAction::Right,
          true, true, "left swipe adjusts right");
 
-  expect(gesture.update(frame(900, 500, true, 1'000), TouchContext::Reader, width, height), TouchAction::None, false,
+  expect(gesture.update(frame(900, 500, true, 1'000), TouchContext::Reader, width, height), TouchAction::PageForward, false,
          false, "reader down must wait");
   expect(gesture.update(frame(900, 500, false, 100'000), TouchContext::Reader, width, height), TouchAction::PageForward,
          true, true, "reader right zone");
 
-  expect(gesture.update(frame(500, 500, true, 1'000), TouchContext::Reader, width, height), TouchAction::None, false,
+  expect(gesture.update(frame(500, 500, true, 1'000), TouchContext::Reader, width, height), TouchAction::Confirm, false,
          false, "swipe down must wait");
   expect(gesture.update(frame(300, 500, false, 100'000), TouchContext::Reader, width, height), TouchAction::PageForward,
          true, true, "left swipe advances");
