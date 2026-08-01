@@ -486,6 +486,11 @@ void updateTouch() {
     received = true;
     lastTouchFrame = frame;
     haveTouchFrame = true;
+    if (frame.discontinuity) {
+      gestures.reset();
+      hasCapturedTouchTarget = false;
+      continue;
+    }
     const bool startsTouch = frame.down && !gestures.isActive();
     if (startsTouch) {
       capturedTouchTarget = TOUCH_UI.resolve(frame.point.x, frame.point.y);
