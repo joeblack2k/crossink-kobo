@@ -29,6 +29,25 @@ bool isProtectedPathSegment(const char* name) {
 // ESP32 doesn't have real-time clock set by default, so we use a fixed epoch date
 // as a fallback. The date is not critical for WebDAV Class 1 operations.
 const char* FIXED_DATE = "Thu, 01 Jan 2024 00:00:00 GMT";
+
+bool mutationAllowed(WebServer& server, const HTTPMethod method) {
+#ifdef KOBO_LINUX
+  const bool mutating = method == HTTP_PUT || method == HTTP_DELETE || method == HTTP_MKCOL ||
+                        method == HTTP_MOVE || method == HTTP_COPY || method == HTTP_LOCK ||
+                        method == HTTP_UNLOCK;
+  if (mutating) {
+    const IPAddress remote = server.client().remoteIP();
+    if (remote[0] != 192 || remote[1] != 168 || remote[2] != 7) {
+      server.send(403, "text/plain", "Mutating operations require USB network access");
+      return false;
+    }
+  }
+#else
+  (void)server;
+  (void)method;
+#endif
+  return true;
+}
 }  // namespace
 
 // ── RequestHandler interface ─────────────────────────────────────────────────
@@ -61,6 +80,10 @@ bool WebDAVHandler::canRaw(WebServer& server, const String& uri) {
 
 void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
   (void)uri;
+  if (!mutationAllowed(server, HTTP_PUT)) {
+    _putOk = false;
+    return;
+  }
   if (raw.status == RAW_START) {
     _putPath = getRequestPath(server);
     if (isProtectedPath(_putPath)) {
@@ -110,7 +133,6 @@ void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
     if (_putFile) _putFile.close();
     if (_putOk) {
       String tempPath = _putPath + ".davtmp";
-      if (_putExisted) Storage.remove(_putPath.c_str());
       HalFile tmp = Storage.open(tempPath.c_str());
       if (tmp) {
         _putOk = tmp.rename(_putPath.c_str());
@@ -132,6 +154,7 @@ void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
 
 bool WebDAVHandler::handle(WebServer& server, HTTPMethod method, const String& uri) {
   (void)uri;
+  if (!mutationAllowed(server, method)) return true;
   switch (method) {
     case HTTP_OPTIONS:
       handleOptions(server);
