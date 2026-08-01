@@ -224,13 +224,26 @@ remaining_risk=De eerste fysieke reconnect en eventuele driver-specifieke protoc
 ### Fase 2 vervolg — semantic touch burst queue
 
 ```text
-status=IN_PROGRESS
+status=FIXED_LOCAL
 root_cause=clearInjectedInputFrame() verwijderde ongeconsumeerde semantic touch targets op iedere framegrens, waardoor snelle taps over meerdere main-loopframes verloren konden gaan.
 implementation=39bd97cb laat de begrensde FIFO over framegrenzen bestaan en voegt expliciete clearing toe bij activitytransition, suspend en nieuwe activity-entry.
 tests=GitHub Actions run 30717384832: Kobo host, CTest, dependency-audit, cppcheck en clang-format PASS; bounded FIFO test bewijst FIFO-volgorde, capaciteit 8, overflowafwijzing en leeg gedrag.
 hardware=Niet uitgevoerd; N437 rapid-tap evidence blijft open.
 commit=97579923
 remaining_risk=De fysieke rapid-tap-afhandeling en eventuele device-specifieke timing moeten nog op de echte N437 worden bevestigd.
+```
+
+### Continuation audit — current branch and prepared baseline
+
+```text
+head_sha=690541c5
+branch=hardening/kobo-beta4
+prepared_check=BLOCKED_BY_EXPECTED_BASELINE_DRIFT
+prepared_check_result=apply_prepared_changes.py --phase all refuses because bbe2f05d4a587d55fa2e6391f9825e376122a76f is not an ancestor of the current hardening branch; prepared changes are already represented by later reviewed commits.
+ci=GitHub Actions run 30717384832 PASS for Kobo host, CTest, dependency-audit, cppcheck and clang-format; docs-only follow-up run was in progress during this audit.
+power_source_review=Kobo path writes mem to /sys/power/state, arms /sys/power/wakeup_count when available, masks auxiliary battery/USB wake sources temporarily, enables Wi-Fi powersave, and restores wake-source state after return.
+hardware=No connected N437 detected on the current host; suspend current, wake latency, frontlight restore and 100-cycle soak remain unproven.
+release_decision=nog niet Beta 4; physical N437 and remaining P0/P1/P2 software gates are open.
 ```
 
 ## Commitlog
