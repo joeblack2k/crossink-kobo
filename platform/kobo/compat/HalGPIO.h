@@ -73,6 +73,8 @@ class HalGPIO {
   crossink::kobo::KoboBatterySysfs battery_;
   bool usbConnected_ = false;
   bool usbChanged_ = false;
+  std::uint64_t lastBatteryReadMs_ = 0;
+  bool haveBatterySnapshot_ = false;
   bool touchActivity_ = false;
 };
 
