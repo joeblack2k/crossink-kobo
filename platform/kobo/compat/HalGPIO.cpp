@@ -12,8 +12,7 @@ namespace {
 std::uint64_t monotonicMilliseconds() {
   timespec now{};
   if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
-  return static_cast<std::uint64_t>(now.tv_sec) * 1000ULL +
-         static_cast<std::uint64_t>(now.tv_nsec) / 1000000ULL;
+  return static_cast<std::uint64_t>(now.tv_sec) * 1000ULL + static_cast<std::uint64_t>(now.tv_nsec) / 1000000ULL;
 }
 }  // namespace
 
@@ -42,8 +41,7 @@ void HalGPIO::update() {
   powerKey_.update();
   constexpr std::uint64_t kBatteryPollIntervalMs = 1000;
   const std::uint64_t now = monotonicMilliseconds();
-  if (haveBatterySnapshot_ && now >= lastBatteryReadMs_ &&
-      now - lastBatteryReadMs_ < kBatteryPollIntervalMs) {
+  if (haveBatterySnapshot_ && now >= lastBatteryReadMs_ && now - lastBatteryReadMs_ < kBatteryPollIntervalMs) {
     return;
   }
   crossink::kobo::BatterySnapshot snapshot;

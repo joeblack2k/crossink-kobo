@@ -428,8 +428,7 @@ void MappedInputManager::injectTouchTarget(const unsigned char kind, const int p
     std::fprintf(stderr, "[KOBO] semantic touch target queue overflow; dropping newest target\n");
     return;
   }
-  const std::size_t slot =
-      (injectedTouchTargetHead + injectedTouchTargetCount) % TOUCH_TARGET_QUEUE_CAPACITY;
+  const std::size_t slot = (injectedTouchTargetHead + injectedTouchTargetCount) % TOUCH_TARGET_QUEUE_CAPACITY;
   injectedTouchTargets[slot] = {kind, primary, secondary, generation, x, y};
   ++injectedTouchTargetCount;
 }
@@ -449,9 +448,8 @@ bool MappedInputManager::consumeTouchTarget(TouchTarget& target) {
 }
 
 bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& currentIndex) {
-  if (injectedTouchTargetCount == 0 ||
-      injectedTouchTargets[injectedTouchTargetHead].kind !=
-          static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) {
+  if (injectedTouchTargetCount == 0 || injectedTouchTargets[injectedTouchTargetHead].kind !=
+                                           static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) {
     return false;
   }
   const TouchTarget target = injectedTouchTargets[injectedTouchTargetHead];

@@ -32,9 +32,8 @@ const char* FIXED_DATE = "Thu, 01 Jan 2024 00:00:00 GMT";
 
 bool mutationAllowed(WebServer& server, const HTTPMethod method) {
 #ifdef KOBO_LINUX
-  const bool mutating = method == HTTP_PUT || method == HTTP_DELETE || method == HTTP_MKCOL ||
-                        method == HTTP_MOVE || method == HTTP_COPY || method == HTTP_LOCK ||
-                        method == HTTP_UNLOCK;
+  const bool mutating = method == HTTP_PUT || method == HTTP_DELETE || method == HTTP_MKCOL || method == HTTP_MOVE ||
+                        method == HTTP_COPY || method == HTTP_LOCK || method == HTTP_UNLOCK;
   if (mutating) {
     const IPAddress remote = server.client().remoteIP();
     if (remote[0] != 192 || remote[1] != 168 || remote[2] != 7) {

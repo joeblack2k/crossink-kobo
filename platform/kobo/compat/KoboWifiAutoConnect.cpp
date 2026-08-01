@@ -26,8 +26,9 @@ void startSavedNetwork(const WifiCredential& credential) {
   WiFi.persistent(false);
   WiFi.setAutoReconnect(true);
   WiFi.mode(WIFI_STA);
-  const wl_status_t result = credential.password.empty() ? WiFi.begin(credential.ssid.c_str())
-                                                           : WiFi.begin(credential.ssid.c_str(), credential.password.c_str());
+  const wl_status_t result = credential.password.empty()
+                                 ? WiFi.begin(credential.ssid.c_str())
+                                 : WiFi.begin(credential.ssid.c_str(), credential.password.c_str());
   configuredSsid = credential.ssid;
   nextAttemptAt = millis() + retryDelayMs;
   LOG_INF("WIFI", "Kobo saved-network connect started: ssid=%s result=%d retry=%lums", configuredSsid.c_str(),

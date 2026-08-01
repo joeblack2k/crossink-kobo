@@ -498,8 +498,9 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   LOG_DBG("JPG",
           "JPEG %dx%d -> %dx%d target=(%d,%d %dx%d) orientation=%d (scale %.2f, jpegScale 1/%d, fineScale %.2fx%.2f)%s",
           srcWidth, srcHeight, destWidth, destHeight, config.x, config.y, config.maxWidth, config.maxHeight,
-          static_cast<int>(renderer.getOrientation()), targetScale, jpegScaleDenom, (float)destWidth / ctx.scaledSrcWidth,
-          (float)destHeight / ctx.scaledSrcHeight, isProgressive ? " [progressive]" : "");
+          static_cast<int>(renderer.getOrientation()), targetScale, jpegScaleDenom,
+          (float)destWidth / ctx.scaledSrcWidth, (float)destHeight / ctx.scaledSrcHeight,
+          isProgressive ? " [progressive]" : "");
 
   // Set pixel type to 8-bit grayscale (must be after open())
   jpeg->setPixelType(EIGHT_BIT_GRAYSCALE);

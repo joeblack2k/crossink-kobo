@@ -177,8 +177,7 @@ MappedInputManager::Button mappedButton(const crossink::kobo::TouchAction action
 }
 
 void dispatch(const crossink::kobo::TouchDispatch event) {
-  if (event.action == crossink::kobo::TouchAction::None ||
-      event.action == crossink::kobo::TouchAction::Cancelled) {
+  if (event.action == crossink::kobo::TouchAction::None || event.action == crossink::kobo::TouchAction::Cancelled) {
     return;
   }
 
@@ -498,10 +497,9 @@ void updateTouch() {
       hasCapturedTouchTarget = capturedTouchTarget.found;
     }
     const auto event = gestures.update(frame, context, screenWidth, screenHeight);
-    if (event.action == crossink::kobo::TouchAction::Cancelled ||
-        event.action == crossink::kobo::TouchAction::Left || event.action == crossink::kobo::TouchAction::Right ||
-        event.action == crossink::kobo::TouchAction::Up || event.action == crossink::kobo::TouchAction::Down ||
-        event.action == crossink::kobo::TouchAction::PageBack ||
+    if (event.action == crossink::kobo::TouchAction::Cancelled || event.action == crossink::kobo::TouchAction::Left ||
+        event.action == crossink::kobo::TouchAction::Right || event.action == crossink::kobo::TouchAction::Up ||
+        event.action == crossink::kobo::TouchAction::Down || event.action == crossink::kobo::TouchAction::PageBack ||
         event.action == crossink::kobo::TouchAction::PageForward) {
       hasCapturedTouchTarget = false;
     }

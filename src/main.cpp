@@ -561,8 +561,9 @@ bool handleGlobalPowerButtonAction(const CrossPointSettings::SHORT_PWRBTN action
 #ifdef KOBO_LINUX
     case CrossPointSettings::SHORT_PWRBTN::CYCLE_FRONTLIGHT: {
       constexpr uint8_t kFrontlightStep = 20;
-      SETTINGS.frontlightBrightness =
-          SETTINGS.frontlightBrightness >= 100 ? 0 : static_cast<uint8_t>(SETTINGS.frontlightBrightness + kFrontlightStep);
+      SETTINGS.frontlightBrightness = SETTINGS.frontlightBrightness >= 100
+                                          ? 0
+                                          : static_cast<uint8_t>(SETTINGS.frontlightBrightness + kFrontlightStep);
       if (!SETTINGS.saveToFile()) {
         LOG_ERR("PWR", "Could not persist frontlight brightness");
       }

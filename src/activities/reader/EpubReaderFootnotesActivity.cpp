@@ -111,8 +111,7 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
     }
 
 #ifdef KOBO_LINUX
-    TOUCH_UI.registerItem(contentX, y, contentWidth, lineHeight, selectedIndex, i,
-                          static_cast<int>(footnotes.size()));
+    TOUCH_UI.registerItem(contentX, y, contentWidth, lineHeight, selectedIndex, i, static_cast<int>(footnotes.size()));
 #endif
 
     // Show footnote number and abbreviated href

@@ -10,8 +10,8 @@
 #include "MappedInputManager.h"
 #include "components/TouchSlider.h"
 #include "components/UITheme.h"
-#include "platform/DeviceCapabilities.h"
 #include "fontIds.h"
+#include "platform/DeviceCapabilities.h"
 
 namespace {
 // Fine/coarse slider step sizes for percent adjustments.

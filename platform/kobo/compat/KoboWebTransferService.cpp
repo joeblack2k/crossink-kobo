@@ -1,8 +1,8 @@
 #include "KoboWebTransferService.h"
 
-#include <memory>
-
 #include <Logging.h>
+
+#include <memory>
 
 #include "CrossPointSettings.h"
 #include "network/CrossPointWebServer.h"

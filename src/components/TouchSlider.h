@@ -23,8 +23,7 @@ inline void registerSegments(const int trackX, const int trackY, const int track
     const int x = trackX + (segment * trackWidth) / count;
     const int nextX = trackX + ((segment + 1) * trackWidth) / count;
     const int value = std::min(maxValue, minValue + segment * std::max(1, step));
-    TOUCH_UI.registerDirect(x, trackY, std::max(1, nextX - x), trackHeight, TouchUiRegistry::TargetKind::Slider,
-                            value);
+    TOUCH_UI.registerDirect(x, trackY, std::max(1, nextX - x), trackHeight, TouchUiRegistry::TargetKind::Slider, value);
   }
 #else
   (void)trackX;

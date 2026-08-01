@@ -1,7 +1,5 @@
 #include "CrossPointSettings.h"
 
-#include "platform/DeviceCapabilities.h"
-
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
@@ -16,6 +14,7 @@
 
 #include "I18nKeys.h"
 #include "fontIds.h"
+#include "platform/DeviceCapabilities.h"
 
 // Initialize the static instance
 CrossPointSettings CrossPointSettings::instance;

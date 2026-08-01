@@ -13,9 +13,9 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
-#include "components/DirectListTouch.h"
 #include "SdCardFontSystem.h"
 #include "WifiCredentialStore.h"
+#include "components/DirectListTouch.h"
 #ifdef KOBO_LINUX
 #include <KoboWifiAutoConnect.h>
 #endif
@@ -222,8 +222,7 @@ void WifiSelectionActivity::onEnter() {
     selectedSSID = WiFi.SSID().c_str();
     connectedIP = WiFi.localIP().toString().c_str();
     state = WifiSelectionState::CONNECTED;
-    LOG_INF("WIFI", "Kobo picker retained existing station: ssid=%s ip=%s", selectedSSID.c_str(),
-            connectedIP.c_str());
+    LOG_INF("WIFI", "Kobo picker retained existing station: ssid=%s ip=%s", selectedSSID.c_str(), connectedIP.c_str());
     requestUpdate();
     return;
   }

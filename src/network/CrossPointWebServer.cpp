@@ -26,7 +26,6 @@
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
-#include "platform/DeviceCapabilities.h"
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
@@ -34,6 +33,7 @@
 #include "html/SettingsPageHtml.generated.h"
 #include "html/StyleCss.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#include "platform/DeviceCapabilities.h"
 #include "util/BookCacheUtils.h"
 #include "util/StringUtils.h"
 

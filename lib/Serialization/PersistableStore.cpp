@@ -36,8 +36,8 @@ bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& 
   if (!completed) {
     output.close();
     Storage.remove(temporaryPath.c_str());
-    LOG_ERR("PERSIST", "Failed to sync temporary file for %s (%u/%u bytes)", path,
-            static_cast<unsigned>(written), static_cast<unsigned>(expected));
+    LOG_ERR("PERSIST", "Failed to sync temporary file for %s (%u/%u bytes)", path, static_cast<unsigned>(written),
+            static_cast<unsigned>(expected));
     return false;
   }
   if (!Storage.rename(temporaryPath.c_str(), path)) {

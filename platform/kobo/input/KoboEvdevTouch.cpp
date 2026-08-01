@@ -209,17 +209,15 @@ bool KoboEvdevTouch::readFrame(TouchFrame& frame) {
       frame.positionChanged = positionChanged_;
       frame.discontinuity = discontinuity;
       const bool validTimestamp = event.seconds >= 0 && event.microseconds >= 0 && event.microseconds < 1'000'000;
-      const std::uint64_t eventTimestamp =
-          validTimestamp ? static_cast<std::uint64_t>(event.seconds) * 1'000'000ULL +
-                               static_cast<std::uint64_t>(event.microseconds)
-                         : 0;
+      const std::uint64_t eventTimestamp = validTimestamp ? static_cast<std::uint64_t>(event.seconds) * 1'000'000ULL +
+                                                                static_cast<std::uint64_t>(event.microseconds)
+                                                          : 0;
       if (validTimestamp && eventTimestamp >= lastTimestampMicros_) {
         frame.timestampMicros = eventTimestamp;
       } else {
         timespec now{};
         clock_gettime(CLOCK_MONOTONIC, &now);
-        frame.timestampMicros =
-            static_cast<std::uint64_t>(now.tv_sec) * 1'000'000ULL + now.tv_nsec / 1'000ULL;
+        frame.timestampMicros = static_cast<std::uint64_t>(now.tv_sec) * 1'000'000ULL + now.tv_nsec / 1'000ULL;
       }
       lastTimestampMicros_ = frame.timestampMicros;
       positionChanged_ = false;
