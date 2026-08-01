@@ -70,7 +70,7 @@ ci_apply=
 | PWR-01 | OPEN |  |  |  |  |
 | PWR-02 | OPEN |  |  |  |  |
 | CAL-01 | OPEN |  |  |  |  |
-| CI-01 | IN_PROGRESS | 100d2564 | workflow source reviewed; hosted Kobo job not run yet | not applicable | Self-hosted release path was removed and CI now configures/builds/tests the Kobo CMake target plus dependency audit; GitHub run evidence remains required. |
+| CI-01 | FIXED_LOCAL | 100d2564, 5e8a5070, 3e3bf97c | GitHub Actions run `30714722189` PASS: Kobo build, CTest, dependency audit, clang-format, cppcheck, Test Status | not applicable | Hosted CI validates the Kobo host target and static checks on the published branch. |
 | CI-02 | OPEN |  |  |  |  |
 | REL-01 | OPEN |  |  |  |  |
 | REL-02 | OPEN |  |  |  |  |
@@ -164,12 +164,12 @@ remaining_risk=
 ### Fase 7 — CI en release
 
 ```text
-status=PARTIAL
-ci_jobs=
+status=CI_GREEN_RELEASE_BLOCKED
+ci_jobs=GitHub Actions run 30714722189: all jobs PASS
 version=
 rc_sha=
 release_decision=
-commit=100d2564
+commit=100d2564, 5e8a5070, 3e3bf97c
 ```
 
 ## Commitlog
