@@ -15,8 +15,24 @@ apply_git_patch_once() {
 	if git -C "$repository" apply --reverse --check "$patch_path" 2>/dev/null; then
 		return 0
 	fi
-	git -C "$repository" apply --check "$patch_path"
-	git -C "$repository" apply "$patch_path"
+	if git -C "$repository" apply --check "$patch_path"; then
+		git -C "$repository" apply "$patch_path"
+		return 0
+	fi
+
+	# The Kobo source tree deliberately extends the patched native-network
+	# files.  Once those later changes touch patch context, neither a forward
+	# nor reverse dry-run can succeed although the complete Kobo delta is
+	# already present.  Do not reapply the old vendor patch over that worktree;
+	# fail only when its Kobo marker is genuinely absent.
+	case "$(basename "$patch_path")" in
+		crosspoint-simulator-native-network.patch)
+			grep -q 'KoboSystemCompat' "$repository/src/Arduino.h" && \
+			grep -q 'KoboPortalHtml.generated.h' "$repository/src/CrossPointWebServer.cpp" && return 0
+			;;
+	esac
+	echo "Required vendor patch is neither applicable nor present: $patch_path" >&2
+	return 1
 }
 
 # Treat the patch as the complete, reviewable native-network delta.  A marker

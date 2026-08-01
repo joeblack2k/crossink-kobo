@@ -5,9 +5,11 @@ betekent dat een bruikbaar deel werkt maar de upstreamfunctie niet compleet is,
 `FAIL` betekent niet werkend/niet echt geport en `N/A-hardware` is uitsluitend
 voor fysiek ontbrekende hardware.
 
-Actieve auditrelease: `dev-ui05-20260713T055657Z`, binary-SHA-256
-`845e7256d2786680b962c69567bfa743257e31b3c72a6399c0bb036b86172b8b`.
-Zie [de code-audit](./kobo-code-audit-2026-07-12.md) voor de open defecten.
+Actieve N437-auditrelease: `dev-plat02-clean-1320c41e-20260713T1559Z`,
+binary-SHA-256
+`dcfa5af75af981792823aa047e2c3ad2717fc23aaa0f9b2c6e4558839be94858`.
+Zie [de code-audit](./kobo-code-audit-2026-07-12.md) en
+`/Users/nijssen/Documents/Kobo/crosspoint.md` voor uitsluitend open werk.
 
 | Domein | Functie | Status | Huidig bewijs / ontbrekend deel |
 |---|---|---:|---|
@@ -17,9 +19,10 @@ Zie [de code-audit](./kobo-code-audit-2026-07-12.md) voor de open defecten.
 | Platform | N437 capabilitymodel | PASS | Gedeelde code gebruikt `DeviceCapabilities`; echte N437 rapporteert touch/frontlight/wifi/suspend en noemt zich nergens X4. ARM-capabilitytest draaide op de reader. [bewijs](../artifacts/kobo/hardware/platform-capabilities/20260713T0212Z/manifest.txt) |
 | Platform | Linux memory, monotone clock, controlled restart and crash path | PASS | Kobo leest werkelijk 442–451 MiB via `/proc`/`sysinfo`; een controlled re-exec herstelde de reader en één afgeschermde SIGABRT-proef schreef PC/LR-crashinfo, herstelde naar CrashActivity en eindigde na de health window met watchdog 0. [bewijs](../artifacts/kobo/hardware/platform-system/20260713T0248Z/manifest.txt) |
 | Platform | Target-aware dependency audit | PASS | Finale Kobo-compilecommands zijn actief ge-preprocessed; geen `esp_now`, ESP-OTA-partitie, `Preferences`, `esp_deep_sleep`, directe `ESP.restart` of ongeautoriseerde ESP-WebServerheader bereikt een Kobo-object. De enige expliciet gemelde tijdelijke POSIX-webserver-ABI blijft onder open PLAT-01. [bewijs](../artifacts/kobo/hardware/platform-dependency-audit/20260713T035130Z/manifest.txt) |
+| Platform | Reproduceerbare native portal | PASS | Schone Git-bundle, vastgepinde vendors en lege Buildroot-output bouwen dezelfde native portalbron. De gegenereerde webheaders zijn byte-stabiel; de verse ARM-binary draaide op N437 en bewees Home, status, settingsmetadata en een upload+delete-rondtrip met watchdog 0. [bewijs](../artifacts/kobo/hardware/platform-portal-repro/plat02-1320c41e/) |
 | Display | Native 1072×1448, juiste polariteit, full/partial/DU | PASS | fysieke reader en refreshbenchmark; geen terugkeer van negatieve EPUB-render |
 | Display | Grayscale, covers en afbeeldingen | PARTIAL | veilige 1-bit fallback werkt; progressive JPEG-afbeeldingen in EPUB gebruiken op ARM een begrensde safe decoder en zijn op N437 cold/warm bewezen. Progressieve coverthumbnails worden nog afzonderlijk behandeld; hoogwaardige grayscale/dither blijft open. |
-| Display | Veilig/Snel/Max-profielen | PARTIAL | Safe-profiel, scheduler, dirty-rects, GC16-herstel, CPUFreq-guard en runtimefallback zijn op N437 bewezen op `dev-refresh-executor-bd1202aa3da9` (`bd1202aa3da9…`). Fast/Max hebben nog geen device-specifieke kwalificatie of zichtbare instelling. |
+| Display | Veilig/Snel/Max-profielen | PARTIAL | Safe is de herstelde standaard. Fast en Max (beta) zijn alleen zichtbaar na afzonderlijke N437-/kernel-/binarygebonden 1000-update-soakmarkers; beide markers, de touchpicker en fysieke Pearl-captures zijn bewezen op `dev-display-hold2-20260713T191500Z-c94a3997` (`c94a3997…7189e`). OPP blijft 396/792/996 MHz, rustgovernor `ondemand`; ioctl/deadline-, stroomverlies- en automatische-fallbackfoutpaden zijn nog open. |
 | Touch | Kalibratie, readerzones en tweeknopsframe | PASS | fysieke kalibratie en readerzonebasis |
 | Touch | Volledig directe touch zonder X4-stappen | PARTIAL | Gedeelde `DirectListTouch` migreerde de auditlijsten en de legacyqueue is verwijderd. N437 bewees System-tab, System→Wi‑Fi, saved-network-rij, OPDS-lijst→detail, toetsenbord, bookmarks, footnotes, clippings, directe woordbereikselectie, touch-Back én de Home-current-bookkaart in één aanraking. De actieve overlapmatrix bewijst bovendien Home, Library, modal, Settings, reader-menu, keyboard en option-dialog zonder verboden z-orderconflict. Overige activityfamilies blijven open. [UI-05](../artifacts/kobo/hardware/ui05/20260713T055657Z/manifest.txt) |
 | Touch | Close Book naar Home | PASS | [bewijs](../artifacts/kobo/hardware/touch/20260711T2215Z/manifest.txt) op actieve release |

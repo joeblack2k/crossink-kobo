@@ -50,7 +50,12 @@ for input in "$reference" "$zimage" "$dtb" "$rootfs" "$recovery"; do
 done
 case "$size_bytes" in ''|*[!0-9]*) echo '--size-bytes must be decimal' >&2; exit 2 ;; esac
 [ $((size_bytes % 512)) -eq 0 ] || { echo 'Card size must be divisible by 512' >&2; exit 1; }
-[ "$size_bytes" -gt 2147483648 ] || { echo 'Refusing image below 2 GiB' >&2; exit 1; }
+# The system partitions have a fixed footprint; only the user partition grows
+# with the supplied card.  Do not impose an arbitrary 2 GiB binary boundary:
+# many cards marketed as "2 GB" are slightly below that value.  Require the
+# actual minimum instead: enough room for the fixed partition layout plus a
+# 512 MiB writable library/cache partition.
+minimum_user_sectors=1048576
 source_date_epoch=${SOURCE_DATE_EPOCH:-1783690441}
 case "$source_date_epoch" in ''|*[!0-9]*) echo 'SOURCE_DATE_EPOCH must be decimal' >&2; exit 1 ;; esac
 export SOURCE_DATE_EPOCH="$source_date_epoch" E2FSPROGS_FAKE_TIME="$source_date_epoch"
@@ -70,7 +75,10 @@ user_start=$((root_start + root_size))
 total_sectors=$((size_bytes / sector_size))
 user_size=$((total_sectors - user_start))
 kernel_room=$(((recovery_start - kernel_start) * sector_size))
-[ "$user_size" -gt 1048576 ] || { echo 'Insufficient user-partition space' >&2; exit 1; }
+[ "$user_size" -ge "$minimum_user_sectors" ] || {
+	echo "Insufficient user-partition space: need at least $((minimum_user_sectors * sector_size)) bytes" >&2
+	exit 1
+}
 
 output_dir=$(CDPATH='' cd -- "$(dirname "$output")" && pwd)
 output="$output_dir/$(basename "$output")"

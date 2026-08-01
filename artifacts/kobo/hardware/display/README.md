@@ -4,6 +4,10 @@ De eigen DRM-backend heeft GC16/full, AUTO/partial en DU/partial op de fysieke
 Kobo Glo HD uitgevoerd zonder ioctl-fout, kernelwaarschuwing, crash of
 watchdogincrement. Na iedere reeks startte de normale GUI opnieuw.
 
+De gebruiker heeft het fysieke scherm na deze reeksen bekeken en expliciet
+bevestigd geen ghosting te hebben waargenomen. Daarmee is de veilige native
+1072×1448 displaybasis voor Beta 1 bewezen.
+
 De 100-update DU-reeks verhoogde de warmste gemeten thermal zone van 46,789 °C
 naar maximaal 51,910 °C; na de test zakte deze naar 47,927 °C. Dit is alleen
 functioneel en thermisch bewijs. Het is nog geen PASS voor acceptatiecriterium
