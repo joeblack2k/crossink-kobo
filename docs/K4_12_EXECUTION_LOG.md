@@ -72,7 +72,7 @@ ci_apply=
 | CAL-01 | OPEN |  |  |  |  |
 | CI-01 | FIXED_LOCAL | 100d2564, 5e8a5070, 3e3bf97c | GitHub Actions run `30714722189` PASS: Kobo build, CTest, dependency audit, clang-format, cppcheck, Test Status | not applicable | Hosted CI validates the Kobo host target and static checks on the published branch. |
 | CI-02 | OPEN |  |  |  |  |
-| REL-01 | OPEN |  |  |  |  |
+| REL-01 | IN_PROGRESS | pending | README fonttargettekst en issueformulier zijn geharmoniseerd; volledige metadata-audit nog nodig | not applicable | Kobo Glo HD N437 is now explicit in the issue template and README no longer presents X4/X3 as the only font-rendering product targets. Version remains 1.4.0-kobo-beta3 until release gates pass. |
 | REL-02 | OPEN |  |  |  |  |
 | MAINT-01 | OPEN |  |  |  |  |
 
@@ -268,6 +268,18 @@ tests=GitHub Actions run 30717826380: Kobo host, CTest, dependency-audit, cppche
 hardware=Niet uitgevoerd; N437 scan cancellation, reconnect and measured UI latency blijven open.
 commit=3ecf5d52
 remaining_risk=The remaining shell-based wpa_cli/status and scan-driver behavior still need runtime timing evidence; no claim is made for battery impact until N437 measurements exist.
+```
+
+### Release hygiene — target wording
+
+```text
+status=IN_PROGRESS
+root_cause=README reader-font copy named X4/X3 as if they were the only product targets, while the issue template omitted the Kobo Glo HD N437.
+implementation=README now describes supported Kobo and legacy ESP32 e-ink targets; the issue template includes Kobo Glo HD N437 as a selectable device.
+tests=Text audit with git grep; no version bump performed because Beta 4 acceptance is not complete.
+hardware=not applicable
+commit=pending
+remaining_risk=Build/package version, changelog policy and remaining legacy target references require a final release-document audit.
 ```
 
 ## Commitlog
