@@ -21,11 +21,14 @@ enum class TouchAction : std::uint8_t {
   PageForward
 };
 
+enum class TouchGesture : std::uint8_t { None, Start, Tap, LongPressStart, LongPressEnd, Swipe, Cancelled };
+
 struct TouchDispatch {
   TouchAction action = TouchAction::None;
   bool press = false;
   bool release = false;
   TouchPoint point{};
+  TouchGesture gesture = TouchGesture::None;
 };
 
 class KoboTouchGesture {

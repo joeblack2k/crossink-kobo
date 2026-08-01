@@ -411,6 +411,13 @@ void MappedInputManager::injectRelease(Button button) {
   injectedHeld[idx] = false;
 }
 
+void MappedInputManager::cancelInjectedPress(const Button button) {
+  const size_t idx = buttonIndex(button);
+  injectedPressed[idx] = false;
+  injectedReleased[idx] = false;
+  injectedHeld[idx] = false;
+}
+
 void MappedInputManager::clearInjectedInputFrame() {
   injectedPressed.fill(false);
   injectedReleased.fill(false);

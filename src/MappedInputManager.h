@@ -57,6 +57,7 @@ class MappedInputManager {
   // remain independent of evdev, SDL and raw hardware button numbers.
   void injectPress(Button button);
   void injectRelease(Button button);
+  void cancelInjectedPress(Button button);
   void clearInjectedInputFrame();
   void injectTouchTarget(unsigned char kind, int primary, int secondary, std::uint32_t generation, int x = -1,
                          int y = -1);
