@@ -55,7 +55,7 @@ ci_apply=
 | TCH-07 | FIXED_LOCAL | 59cf1d50, 4fe51abe | `crossink-kobo-evdev-touch` PASS in GitHub run `30715081795` | ARM/N437 timestamp evidence ontbreekt | Kernel event timestamps are now preferred; the host parser test proves timestamp preservation and monotone fallback path coverage remains hardware-dependent. |
 | TCH-08 | FIXED_LOCAL | 59cf1d50, 4fe51abe | `crossink-kobo-evdev-touch` PASS in GitHub run `30715081795` | N437 drop/resync evidence ontbreekt | Host eventstream proves `SYN_DROPPED` emits discontinuity and subsequent touch frames recover; physical device-loss/reconnect evidence remains open. |
 | TCH-09 | FIXED_LOCAL | 5d601a89 | GitHub Actions run `30716861535` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format; EOF/device-loss assertion in evdev test | N437 unplug/reconnect evidence ontbreekt | Typed read results distinguish idle queue, EINTR, resync, device loss and protocol failure; the Kobo loop resets gesture state and retries discovery/open with a 500 ms bound. |
-| TCH-10 | FIXED_LOCAL | 795d20b7 | source review; FIFO stress test ontbreekt | N437 rapid-tap evidence ontbreekt | Semantic touch targets use an 8-entry bounded FIFO and log/drop the newest item on overflow instead of overwriting an earlier target. |
+| TCH-10 | IN_PROGRESS | 795d20b7, 39bd97cb | GitHub Actions run `30717054689` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format; bursttest ontbreekt | N437 rapid-tap evidence ontbreekt | The 8-entry FIFO now survives frame boundaries and is explicitly cleared on activity transition/suspend; newest overflow is still logged and dropped. A focused queue bursttest remains open. |
 | NET-01 | IN_PROGRESS | afc4e3b2 | source review; latency test not available on macOS | N437 timing evidence ontbreekt | Background saved-network service is rate-limited to 500 ms; `iw` scan and DHCP failure/latency tests remain open. |
 | WEB-01 | IN_PROGRESS | d0c28537 | source inspection only; no negative HTTP/WebDAV authorization tests yet | N437 exposure test ontbreekt | Kobo mutating HTTP/WebDAV requests now require the documented USB subnet; WebSocket mutators are not started on Kobo. Token/pairing is not implemented, so broader interface audit remains open. |
 | WEB-02 | FIXED_LOCAL | d0c28537 | source-level atomic staging; failure-injection tests still required | N437 abort/disk-full test ontbreekt | HTTP, WebSocket, font and WebDAV PUT paths stage in same directory and do not remove the prior destination before activation. |
@@ -219,6 +219,18 @@ tests=GitHub Actions run 30716861535: Kobo host, CTest, dependency-audit, cppche
 hardware=Niet uitgevoerd; fysieke unplug/reconnect en stale-touch-proef op N437 blijven open.
 commit=5d601a89
 remaining_risk=De eerste fysieke reconnect en eventuele driver-specifieke protocolfout moeten op het echte evdev-device worden bevestigd.
+```
+
+### Fase 2 vervolg — semantic touch burst queue
+
+```text
+status=IN_PROGRESS
+root_cause=clearInjectedInputFrame() verwijderde ongeconsumeerde semantic touch targets op iedere framegrens, waardoor snelle taps over meerdere main-loopframes verloren konden gaan.
+implementation=39bd97cb laat de begrensde FIFO over framegrenzen bestaan en voegt expliciete clearing toe bij activitytransition, suspend en nieuwe activity-entry.
+tests=GitHub Actions run 30717054689: Kobo host, CTest, dependency-audit, cppcheck en clang-format PASS; een queue-specifieke burst/overflowtest is nog niet toegevoegd.
+hardware=Niet uitgevoerd; N437 rapid-tap evidence blijft open.
+commit=39bd97cb
+remaining_risk=De FIFO-capaciteit en overflowvolgorde moeten nog met een gerichte standalone test worden bewezen.
 ```
 
 ## Commitlog
