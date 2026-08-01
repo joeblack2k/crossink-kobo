@@ -426,8 +426,9 @@ void MappedInputManager::clearInjectedInputFrame() {
 void MappedInputManager::clearInjectedTouchTargets() { injectedTouchTargets.clear(); }
 
 void MappedInputManager::injectTouchTarget(const unsigned char kind, const int primary, const int secondary,
-                                           const std::uint32_t generation, const int x, const int y) {
-  if (!injectedTouchTargets.push({kind, primary, secondary, generation, x, y})) {
+                                           const std::uint32_t generation, const int x, const int y,
+                                           const bool longPress) {
+  if (!injectedTouchTargets.push({kind, primary, secondary, generation, x, y, longPress})) {
     std::fprintf(stderr, "[KOBO] semantic touch target queue overflow; dropping newest target\n");
     return;
   }
@@ -444,7 +445,7 @@ bool MappedInputManager::consumeTouchTarget(TouchTarget& target) {
   return true;
 }
 
-bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& currentIndex) {
+bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& currentIndex, bool* longPress) {
   const TouchTarget* queued = injectedTouchTargets.front();
   if (queued == nullptr || queued->kind != static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) {
     return false;
@@ -453,6 +454,7 @@ bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& cur
   (void)injectedTouchTargets.pop(target);
   targetIndex = target.primary;
   currentIndex = target.secondary;
+  if (longPress != nullptr) *longPress = target.longPress;
   // See consumeTouchTarget(): no second activation may use a previous render.
   if (target.generation != TOUCH_UI.generation()) return false;
   TOUCH_UI.invalidate();
