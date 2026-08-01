@@ -1,8 +1,8 @@
 #include <linux/input.h>
+#include <unistd.h>
 
 #include <cstdio>
 #include <cstdlib>
-#include <unistd.h>
 
 #include "KoboEvdevAbi.h"
 #include "KoboEvdevTouch.h"
