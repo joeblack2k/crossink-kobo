@@ -424,26 +424,19 @@ void MappedInputManager::clearInjectedInputFrame() {
 }
 
 void MappedInputManager::clearInjectedTouchTargets() {
-  injectedTouchTargetHead = 0;
-  injectedTouchTargetCount = 0;
+  injectedTouchTargets.clear();
 }
 
 void MappedInputManager::injectTouchTarget(const unsigned char kind, const int primary, const int secondary,
                                            const std::uint32_t generation, const int x, const int y) {
-  if (injectedTouchTargetCount >= TOUCH_TARGET_QUEUE_CAPACITY) {
+  if (!injectedTouchTargets.push({kind, primary, secondary, generation, x, y})) {
     std::fprintf(stderr, "[KOBO] semantic touch target queue overflow; dropping newest target\n");
     return;
   }
-  const std::size_t slot = (injectedTouchTargetHead + injectedTouchTargetCount) % TOUCH_TARGET_QUEUE_CAPACITY;
-  injectedTouchTargets[slot] = {kind, primary, secondary, generation, x, y};
-  ++injectedTouchTargetCount;
 }
 
 bool MappedInputManager::consumeTouchTarget(TouchTarget& target) {
-  if (injectedTouchTargetCount == 0) return false;
-  target = injectedTouchTargets[injectedTouchTargetHead];
-  injectedTouchTargetHead = (injectedTouchTargetHead + 1) % TOUCH_TARGET_QUEUE_CAPACITY;
-  --injectedTouchTargetCount;
+  if (!injectedTouchTargets.pop(target)) return false;
   // A direct target represents one rendered visual state. Once an activity
   // acts on it, invalidate every remaining hitbox immediately rather than
   // waiting for the asynchronous e-ink render to begin. This closes the
@@ -454,13 +447,13 @@ bool MappedInputManager::consumeTouchTarget(TouchTarget& target) {
 }
 
 bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& currentIndex) {
-  if (injectedTouchTargetCount == 0 || injectedTouchTargets[injectedTouchTargetHead].kind !=
-                                           static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) {
+  const TouchTarget* queued = injectedTouchTargets.front();
+  if (queued == nullptr ||
+      queued->kind != static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) {
     return false;
   }
-  const TouchTarget target = injectedTouchTargets[injectedTouchTargetHead];
-  injectedTouchTargetHead = (injectedTouchTargetHead + 1) % TOUCH_TARGET_QUEUE_CAPACITY;
-  --injectedTouchTargetCount;
+  TouchTarget target{};
+  (void)injectedTouchTargets.pop(target);
   targetIndex = target.primary;
   currentIndex = target.secondary;
   // See consumeTouchTarget(): no second activation may use a previous render.
