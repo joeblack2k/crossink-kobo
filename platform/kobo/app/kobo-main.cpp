@@ -605,6 +605,7 @@ namespace crossink::kobo {
 void prepareTouchForSuspend() {
   gestures.reset();
   hasCapturedTouchTarget = false;
+  mappedInputManager.clearInjectedTouchTargets();
   haveTouchFrame = false;
   if (hasProvisionalLongPressButton) {
     mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
