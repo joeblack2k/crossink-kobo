@@ -49,7 +49,7 @@ ci_apply=
 | TCH-01 | FIXED_LOCAL | 18eb8fce | `crossink-kobo-touch-ui-registry` PASS; staged-frame test | not required for local logic | Renderthread publishes a complete staging buffer under one commit; old committed frame remains visible during staging. |
 | TCH-02 | FIXED_LOCAL | 18eb8fce | `crossink-kobo-touch-ui-registry` PASS; generation changes on commit/invalidate | N437 transition proof still required | Generation is checked before consuming an injected target; activity/target consumption invalidates the active generation. |
 | TCH-03 | FIXED_LOCAL | 64fdeb98 | standalone gesture test PASS; routing E2E ontbreekt | N437 gesture proof ontbreekt | Touch target is captured on touchdown and only tap/long-press-compatible actions use it; swipe/navigation actions cannot activate the captured UI target. |
-| TCH-04 | OPEN |  |  |  |  |
+| TCH-04 | FIXED_LOCAL | 5252c706 | GitHub Actions run `30718025096` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format | N437 direct long-press evidence ontbreekt | Navigation touch targets can now carry a semantic long-press marker; Recent Books opens its action menu from that target without synthetic Confirm edges. Raw evdev-to-activity E2E remains open. |
 | TCH-05 | FIXED_LOCAL | 64fdeb98 | standalone gesture test PASS for explicit deadband cancellation | N437 proof ontbreekt | Movement outside tap slop and below swipe distance emits `Cancelled` instead of silently disappearing. |
 | TCH-06 | FIXED_LOCAL | c0c511f4 | source review; host build blocked by missing Linux headers | N437 autosleep soak ontbreekt | Raw touch frames now mark the existing main-loop activity latch; a touch-only gesture resets the sleep timer. |
 | TCH-07 | FIXED_LOCAL | 59cf1d50, 4fe51abe | `crossink-kobo-evdev-touch` PASS in GitHub run `30715081795` | ARM/N437 timestamp evidence ontbreekt | Kernel event timestamps are now preferred; the host parser test proves timestamp preservation and monotone fallback path coverage remains hardware-dependent. |
@@ -109,7 +109,7 @@ implementation=Touchdown captures the committed target generation; non-target na
 tests=Standalone clang++ gesture test PASS with deadband case. Full CMake gesture target is blocked on macOS missing linux/input.h; raw routing E2E still missing.
 hardware=Niet uitgevoerd.
 commit=64fdeb98
-remaining_risk=Long-press remains button-like rather than a distinct semantic target; bounded FIFO and raw evdev E2E remain open.
+remaining_risk=The semantic long-press route is locally integrated, but raw evdev-to-activity E2E and direct N437 long-press evidence remain open.
 ```
 
 ### Fase 3 — evdev-hardening
