@@ -34,7 +34,7 @@ en web/security/CI; alle conclusies worden lokaal gecontroleerd.
 ## Prepared-code application
 
 ```text
-check_only=not yet run
+check_only=FAILED: prepared baseline bbe2f05d4a587d55fa2e6391f9825e376122a76f is not an ancestor/object of current HEAD 6aa44799c754e738cd3ccb98e71cf65e2c5c57da; phases cannot be applied blindly
 touch_registry_apply=
 touch_gestures_apply=
 loop_power_apply=
@@ -46,24 +46,24 @@ ci_apply=
 
 | ID | Status | Commit(s) | Automatische tests | Hardwarebewijs | Notities |
 |---|---|---|---|---|---|
-| TCH-01 | OPEN |  |  |  |  |
-| TCH-02 | OPEN |  |  |  |  |
-| TCH-03 | OPEN |  |  |  |  |
+| TCH-01 | FIXED_LOCAL | 18eb8fce | `crossink-kobo-touch-ui-registry` PASS; staged-frame test | not required for local logic | Renderthread publishes a complete staging buffer under one commit; old committed frame remains visible during staging. |
+| TCH-02 | FIXED_LOCAL | 18eb8fce | `crossink-kobo-touch-ui-registry` PASS; generation changes on commit/invalidate | N437 transition proof still required | Generation is checked before consuming an injected target; activity/target consumption invalidates the active generation. |
+| TCH-03 | FIXED_LOCAL | 64fdeb98 | standalone gesture test PASS; routing E2E ontbreekt | N437 gesture proof ontbreekt | Touch target is captured on touchdown and only tap/long-press-compatible actions use it; swipe/navigation actions cannot activate the captured UI target. |
 | TCH-04 | OPEN |  |  |  |  |
-| TCH-05 | OPEN |  |  |  |  |
+| TCH-05 | FIXED_LOCAL | 64fdeb98 | standalone gesture test PASS for explicit deadband cancellation | N437 proof ontbreekt | Movement outside tap slop and below swipe distance emits `Cancelled` instead of silently disappearing. |
 | TCH-06 | OPEN |  |  |  |  |
-| TCH-07 | OPEN |  |  |  |  |
-| TCH-08 | OPEN |  |  |  |  |
+| TCH-07 | IN_PROGRESS | 59cf1d50 | code uses EVIOCSCLOCKID and event timestamp with monotone fallback; parser test ontbreekt | ARM/N437 timestamp evidence ontbreekt | Kernel event timestamps are now preferred; invalid or regressing values use CLOCK_MONOTONIC. |
+| TCH-08 | IN_PROGRESS | 59cf1d50 | code resets gesture/capture after SYN_DROPPED frame; injected parser test ontbreekt | N437 drop/resync evidence ontbreekt | SYN_DROPPED discards the current contact state and emits an explicit discontinuity frame. |
 | TCH-09 | OPEN |  |  |  |  |
 | TCH-10 | OPEN |  |  |  |  |
 | NET-01 | OPEN |  |  |  |  |
-| WEB-01 | OPEN |  |  |  |  |
-| WEB-02 | OPEN |  |  |  |  |
+| WEB-01 | IN_PROGRESS | d0c28537 | source inspection only; no negative HTTP/WebDAV authorization tests yet | N437 exposure test ontbreekt | Kobo mutating HTTP/WebDAV requests now require the documented USB subnet; WebSocket mutators are not started on Kobo. Token/pairing is not implemented, so broader interface audit remains open. |
+| WEB-02 | FIXED_LOCAL | d0c28537 | source-level atomic staging; failure-injection tests still required | N437 abort/disk-full test ontbreekt | HTTP, WebSocket, font and WebDAV PUT paths stage in same directory and do not remove the prior destination before activation. |
 | SYS-01 | OPEN |  |  |  |  |
 | SYS-02 | OPEN |  |  |  |  |
 | NET-02 | OPEN |  |  |  |  |
 | NET-03 | OPEN |  |  |  |  |
-| WEB-03 | OPEN |  |  |  |  |
+| WEB-03 | FIXED_LOCAL | d0c28537 | source-level staging/write/sync checks | N437 WebSocket disabled/HTTP fallback proof ontbreekt | WebSocket upload is staged and disabled on Kobo; font upload checks writes and magic before rename. |
 | DSP-01 | OPEN |  |  |  |  |
 | DSP-02 | OPEN |  |  |  |  |
 | DSP-03 | OPEN |  |  |  |  |
@@ -91,37 +91,37 @@ commit=
 ### Fase 1 — atomische touchpublicatie
 
 ```text
-status=
-root_cause=
-implementation=
-tests=
-hardware=
-commit=
-remaining_risk=
+status=FIXED_LOCAL
+root_cause=Renderthread registratie schreef rechtstreeks in de actieve registry; input kon een half opgebouwd frame lezen. Generation werd niet veilig gepubliceerd/ongeldig gemaakt bij consumptie.
+implementation=TouchUiRegistry kreeg stagingRegions, beginFrame/commitFrame, invalidate en generation-validatie. ActivityManager commit de registry na render; MappedInputManager weigert stale targets.
+tests=cmake host target crossink-kobo-touch-ui-registry-test; ctest PASS (1/1). De volledige macOS Kobo-build blijft baseline-FAIL door ontbrekende Linux-headers en GPIO-linktest.
+hardware=Niet uitgevoerd; geen N437-bereikbaarheid tijdens baseline-probe.
+commit=18eb8fce
+remaining_risk=Activity-instance-ID is vervangen door generation invalidation; directe raw-evdev-to-activity E2E en ARM/N437 bewijs ontbreken.
 ```
 
 ### Fase 2 — semantische touch en gestures
 
 ```text
-status=
-root_cause=
-implementation=
-tests=
-hardware=
-commit=
-remaining_risk=
+status=IN_PROGRESS
+root_cause=Release-point resolution allowed a swipe starting over a target to activate a different target; 25-71 px movement disappeared silently.
+implementation=Touchdown captures the committed target generation; non-target navigation actions clear capture. Gesture deadband emits explicit Cancelled. Activity transitions invalidate the registry.
+tests=Standalone clang++ gesture test PASS with deadband case. Full CMake gesture target is blocked on macOS missing linux/input.h; raw routing E2E still missing.
+hardware=Niet uitgevoerd.
+commit=64fdeb98
+remaining_risk=Long-press remains button-like rather than a distinct semantic target; bounded FIFO and raw evdev E2E remain open.
 ```
 
 ### Fase 3 — evdev-hardening
 
 ```text
-status=
-root_cause=
-implementation=
-tests=
-hardware=
-commit=
-remaining_risk=
+status=IN_PROGRESS
+root_cause=readFrame ignored kernel event timestamps and had no SYN_DROPPED handling, so backlog/discontinuity could distort long-press timing or leave stale contact state.
+implementation=EVIOCSCLOCKID(CLOCK_MONOTONIC) is requested; valid monotone event timestamps are used with fallback; SYN_DROPPED clears contact state and emits a discontinuity frame that resets gesture capture.
+tests=No local compile because macOS lacks linux/input.h; parser fault-injection test still required.
+hardware=Niet uitgevoerd.
+commit=59cf1d50
+remaining_risk=Typed read errors, bounded reconnect/backoff, multitouch resync and raw-evdev-to-activity E2E remain open.
 ```
 
 ### Fase 4 — main loop, power en Wi-Fi
