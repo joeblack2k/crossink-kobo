@@ -59,6 +59,7 @@ class MappedInputManager {
   void injectRelease(Button button);
   void cancelInjectedPress(Button button);
   void clearInjectedInputFrame();
+  void clearInjectedTouchTargets();
   void injectTouchTarget(unsigned char kind, int primary, int secondary, std::uint32_t generation, int x = -1,
                          int y = -1);
   bool consumeTouchTarget(TouchTarget& target);

@@ -421,10 +421,9 @@ void MappedInputManager::cancelInjectedPress(const Button button) {
 void MappedInputManager::clearInjectedInputFrame() {
   injectedPressed.fill(false);
   injectedReleased.fill(false);
-  // Touch targets are one-frame messages.  Button edges and a direct target
-  // are both injected before Activity::loop(); keeping an unconsumed target
-  // for another frame could execute an action after the activity/modal that
-  // published it has already changed.
+}
+
+void MappedInputManager::clearInjectedTouchTargets() {
   injectedTouchTargetHead = 0;
   injectedTouchTargetCount = 0;
 }
