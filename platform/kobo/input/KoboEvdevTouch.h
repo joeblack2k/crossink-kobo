@@ -34,6 +34,7 @@ class KoboEvdevTouch {
 
   [[nodiscard]] static bool discover(TouchDeviceInfo& result, const std::string& inputDirectory = "/dev/input");
   [[nodiscard]] bool open(const TouchDeviceInfo& device, TouchCalibration calibration = {});
+  [[nodiscard]] bool reopen();
   void close();
   void setOrientation(ScreenOrientation orientation);
 

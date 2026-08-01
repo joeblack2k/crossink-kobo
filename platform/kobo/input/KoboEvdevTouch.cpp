@@ -152,6 +152,12 @@ bool KoboEvdevTouch::open(const TouchDeviceInfo& device, TouchCalibration calibr
   return true;
 }
 
+bool KoboEvdevTouch::reopen() {
+  if (device_.path.empty()) return false;
+  const TouchDeviceInfo device = device_;
+  return open(device);
+}
+
 void KoboEvdevTouch::close() {
   if (fd_ >= 0) {
     ::close(fd_);
