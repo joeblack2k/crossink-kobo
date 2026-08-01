@@ -48,6 +48,7 @@ crossink::kobo::TouchFrame lastTouchFrame{};
 bool haveTouchFrame = false;
 TouchUiRegistry::Resolution capturedTouchTarget{};
 bool hasCapturedTouchTarget = false;
+bool hasCapturedLongPressTarget = false;
 MappedInputManager::Button provisionalLongPressButton = MappedInputManager::Button::Confirm;
 bool hasProvisionalLongPressButton = false;
 crossink::kobo::KoboFrontlightSysfs frontlight;
@@ -201,6 +202,25 @@ void dispatch(const crossink::kobo::TouchDispatch event) {
     return;
   }
 
+  if (event.gesture == TouchGesture::LongPressStart && hasCapturedTouchTarget &&
+      capturedTouchTarget.generation == TOUCH_UI.generation()) {
+    mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+    mappedInputManager.injectTouchTarget(
+        static_cast<unsigned char>(capturedTouchTarget.kind), capturedTouchTarget.targetIndex,
+        capturedTouchTarget.kind == TouchUiRegistry::TargetKind::NavigationItem ? capturedTouchTarget.currentIndex
+                                                                                : capturedTouchTarget.secondaryTarget,
+        capturedTouchTarget.generation, event.point.x, event.point.y, true);
+    hasCapturedLongPressTarget = true;
+    return;
+  }
+
+  if (event.gesture == TouchGesture::LongPressEnd && hasCapturedLongPressTarget) {
+    hasCapturedLongPressTarget = false;
+    hasCapturedTouchTarget = false;
+    return;
+  }
+
   if (event.gesture == TouchGesture::Tap && hasProvisionalLongPressButton) {
     mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
     hasProvisionalLongPressButton = false;
@@ -213,6 +233,9 @@ void dispatch(const crossink::kobo::TouchDispatch event) {
              hasProvisionalLongPressButton) {
     mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
     hasProvisionalLongPressButton = false;
+  }
+  if (event.gesture == TouchGesture::Swipe || event.gesture == TouchGesture::Cancelled) {
+    hasCapturedLongPressTarget = false;
   }
 
   if (event.action == crossink::kobo::TouchAction::None || event.action == crossink::kobo::TouchAction::Cancelled) {
@@ -605,6 +628,7 @@ namespace crossink::kobo {
 void prepareTouchForSuspend() {
   gestures.reset();
   hasCapturedTouchTarget = false;
+  hasCapturedLongPressTarget = false;
   mappedInputManager.clearInjectedTouchTargets();
   haveTouchFrame = false;
   if (hasProvisionalLongPressButton) {
@@ -624,6 +648,7 @@ bool resumeTouchAfterSuspend() {
   }
   gestures.reset();
   hasCapturedTouchTarget = false;
+  hasCapturedLongPressTarget = false;
   haveTouchFrame = false;
   return true;
 }
