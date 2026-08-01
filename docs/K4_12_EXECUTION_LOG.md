@@ -51,11 +51,11 @@ ci_apply=
 | TCH-03 | FIXED_LOCAL | 64fdeb98 | standalone gesture test PASS; routing E2E ontbreekt | N437 gesture proof ontbreekt | Touch target is captured on touchdown and only tap/long-press-compatible actions use it; swipe/navigation actions cannot activate the captured UI target. |
 | TCH-04 | OPEN |  |  |  |  |
 | TCH-05 | FIXED_LOCAL | 64fdeb98 | standalone gesture test PASS for explicit deadband cancellation | N437 proof ontbreekt | Movement outside tap slop and below swipe distance emits `Cancelled` instead of silently disappearing. |
-| TCH-06 | OPEN |  |  |  |  |
+| TCH-06 | FIXED_LOCAL | c0c511f4 | source review; host build blocked by missing Linux headers | N437 autosleep soak ontbreekt | Raw touch frames now mark the existing main-loop activity latch; a touch-only gesture resets the sleep timer. |
 | TCH-07 | IN_PROGRESS | 59cf1d50 | code uses EVIOCSCLOCKID and event timestamp with monotone fallback; parser test ontbreekt | ARM/N437 timestamp evidence ontbreekt | Kernel event timestamps are now preferred; invalid or regressing values use CLOCK_MONOTONIC. |
 | TCH-08 | IN_PROGRESS | 59cf1d50 | code resets gesture/capture after SYN_DROPPED frame; injected parser test ontbreekt | N437 drop/resync evidence ontbreekt | SYN_DROPPED discards the current contact state and emits an explicit discontinuity frame. |
 | TCH-09 | OPEN |  |  |  |  |
-| TCH-10 | OPEN |  |  |  |  |
+| TCH-10 | FIXED_LOCAL | 795d20b7 | source review; FIFO stress test ontbreekt | N437 rapid-tap evidence ontbreekt | Semantic touch targets use an 8-entry bounded FIFO and log/drop the newest item on overflow instead of overwriting an earlier target. |
 | NET-01 | OPEN |  |  |  |  |
 | WEB-01 | IN_PROGRESS | d0c28537 | source inspection only; no negative HTTP/WebDAV authorization tests yet | N437 exposure test ontbreekt | Kobo mutating HTTP/WebDAV requests now require the documented USB subnet; WebSocket mutators are not started on Kobo. Token/pairing is not implemented, so broader interface audit remains open. |
 | WEB-02 | FIXED_LOCAL | d0c28537 | source-level atomic staging; failure-injection tests still required | N437 abort/disk-full test ontbreekt | HTTP, WebSocket, font and WebDAV PUT paths stage in same directory and do not remove the prior destination before activation. |
@@ -70,7 +70,7 @@ ci_apply=
 | PWR-01 | OPEN |  |  |  |  |
 | PWR-02 | OPEN |  |  |  |  |
 | CAL-01 | OPEN |  |  |  |  |
-| CI-01 | OPEN |  |  |  |  |
+| CI-01 | IN_PROGRESS | 100d2564 | workflow source reviewed; hosted Kobo job not run yet | not applicable | Self-hosted release path was removed and CI now configures/builds/tests the Kobo CMake target plus dependency audit; GitHub run evidence remains required. |
 | CI-02 | OPEN |  |  |  |  |
 | REL-01 | OPEN |  |  |  |  |
 | REL-02 | OPEN |  |  |  |  |
@@ -127,15 +127,15 @@ remaining_risk=Typed read errors, bounded reconnect/backoff, multitouch resync a
 ### Fase 4 — main loop, power en Wi-Fi
 
 ```text
-status=
-root_cause=
-implementation=
+status=PARTIAL
+root_cause=Touch frames were not part of the existing inactivity activity set.
+implementation=c0c511f4 adds a one-shot touch activity latch in HalGPIO and marks it from the Kobo touch reader. 795d20b7 bounds semantic target delivery with a FIFO.
 latency_before=
 latency_after=
-tests=
+tests=Source/diff review; full Kobo compile is blocked on macOS by missing linux/input.h.
 hardware=
-commit=
-remaining_risk=
+commit=c0c511f4, 795d20b7
+remaining_risk=Wi-Fi cadence/blocking and battery snapshot cadence still require implementation and ARM/N437 validation.
 ```
 
 ### Fase 5 — webbeveiliging en atomic I/O
@@ -164,12 +164,12 @@ remaining_risk=
 ### Fase 7 — CI en release
 
 ```text
-status=
+status=PARTIAL
 ci_jobs=
 version=
 rc_sha=
 release_decision=
-commit=
+commit=100d2564
 ```
 
 ## Commitlog
