@@ -67,7 +67,7 @@ ci_apply=
 | DSP-01 | OPEN |  |  |  |  |
 | DSP-02 | OPEN |  |  |  |  |
 | DSP-03 | OPEN |  |  |  |  |
-| PWR-01 | OPEN |  |  |  |  |
+| PWR-01 | FIXED_LOCAL | aff0b420, 7daf4a16 | GitHub Actions run `30716270944` PASS: Kobo host, CTest, cppcheck, clang-format, dependency audit | N437 wake/reconnect proof ontbreekt | Suspend preparation now resets gesture/capture/injected touch state and closes evdev; resume reopens the original device or rediscovers it. |
 | PWR-02 | OPEN |  |  |  |  |
 | CAL-01 | OPEN |  |  |  |  |
 | CI-01 | FIXED_LOCAL | 100d2564, 5e8a5070, 3e3bf97c | GitHub Actions run `30714722189` PASS: Kobo build, CTest, dependency audit, clang-format, cppcheck, Test Status | not applicable | Hosted CI validates the Kobo host target and static checks on the published branch. |
@@ -171,6 +171,18 @@ rc_sha=not assigned
 release_decision=nog niet Beta 4; physical N437 gates remain open
 draft_pr=https://github.com/joeblack2k/crossink-kobo/pull/1
 commit=100d2564, 5e8a5070, 3e3bf97c, 4fe51abe, f0699977, 448dcc5a
+```
+
+### Fase 6 vervolg — touchstate rond suspend
+
+```text
+status=FIXED_LOCAL
+root_cause=De Kobo evdev-descriptor en gesturestate bleven over een RAM-suspend heen bestaan, waardoor oude frames of een stale down-state na wake konden worden verwerkt.
+implementation=aff0b420 voegt een lifecycle-hook toe: vóór suspend worden gesture/capture/injected state gereset en wordt evdev gesloten; na wake wordt het device heropend of opnieuw ontdekt. 7daf4a16 corrigeert de clang-format-volgorde.
+tests=GitHub Actions run 30716270944: Kobo host, CTest, dependency-audit, cppcheck en clang-format PASS.
+hardware=Niet uitgevoerd; N437 suspend/wake/reconnect-soak blijft open.
+commit=aff0b420, 7daf4a16
+remaining_risk=Kernel wake-sourcegedrag, eerste wake-frame, frontlightherstel en fysieke stale-touch/reconnect moeten op de N437 worden gemeten.
 ```
 
 ## Commitlog
