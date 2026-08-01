@@ -755,7 +755,9 @@ void enterDeepSleep(bool fromTimeout) {
 #endif
   ignorePowerActionsUntil = millis() + POWER_WAKE_RELEASE_GUARD_MS;
   OPDS_SYNC.resumeAfterSuspend();
-  WiFi.setSleep(false);
+  // Keep the radio in powersave after wake unless the persistent transfer
+  // service is actually running and needs a responsive WLAN link.
+  WiFi.setSleep(!crossink::kobo::webTransferRunning());
   crossink::kobo::setWifiAutoConnectSuspended(false);
   crossink::kobo::KoboSuspendController::recordEvent("resume_returned",
                                                      "elapsed_ms=" + std::to_string(suspendElapsedMs));
