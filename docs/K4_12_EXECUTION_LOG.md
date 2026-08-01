@@ -56,11 +56,11 @@ ci_apply=
 | TCH-08 | IN_PROGRESS | 59cf1d50 | code resets gesture/capture after SYN_DROPPED frame; injected parser test ontbreekt | N437 drop/resync evidence ontbreekt | SYN_DROPPED discards the current contact state and emits an explicit discontinuity frame. |
 | TCH-09 | OPEN |  |  |  |  |
 | TCH-10 | FIXED_LOCAL | 795d20b7 | source review; FIFO stress test ontbreekt | N437 rapid-tap evidence ontbreekt | Semantic touch targets use an 8-entry bounded FIFO and log/drop the newest item on overflow instead of overwriting an earlier target. |
-| NET-01 | OPEN |  |  |  |  |
+| NET-01 | IN_PROGRESS | afc4e3b2 | source review; latency test not available on macOS | N437 timing evidence ontbreekt | Background saved-network service is rate-limited to 500 ms; `iw` scan and DHCP failure/latency tests remain open. |
 | WEB-01 | IN_PROGRESS | d0c28537 | source inspection only; no negative HTTP/WebDAV authorization tests yet | N437 exposure test ontbreekt | Kobo mutating HTTP/WebDAV requests now require the documented USB subnet; WebSocket mutators are not started on Kobo. Token/pairing is not implemented, so broader interface audit remains open. |
 | WEB-02 | FIXED_LOCAL | d0c28537 | source-level atomic staging; failure-injection tests still required | N437 abort/disk-full test ontbreekt | HTTP, WebSocket, font and WebDAV PUT paths stage in same directory and do not remove the prior destination before activation. |
 | SYS-01 | OPEN |  |  |  |  |
-| SYS-02 | OPEN |  |  |  |  |
+| SYS-02 | FIXED_LOCAL | 8c82cc9b | shell/Python checks pass; ARM build unavailable on macOS | N437 power trace ontbreekt | Battery/USB sysfs polling in HalGPIO is capped at one snapshot per second while key input remains per-frame. |
 | NET-02 | OPEN |  |  |  |  |
 | NET-03 | OPEN |  |  |  |  |
 | WEB-03 | FIXED_LOCAL | d0c28537 | source-level staging/write/sync checks | N437 WebSocket disabled/HTTP fallback proof ontbreekt | WebSocket upload is staged and disabled on Kobo; font upload checks writes and magic before rename. |
@@ -129,13 +129,13 @@ remaining_risk=Typed read errors, bounded reconnect/backoff, multitouch resync a
 ```text
 status=PARTIAL
 root_cause=Touch frames were not part of the existing inactivity activity set.
-implementation=c0c511f4 adds a one-shot touch activity latch in HalGPIO and marks it from the Kobo touch reader. 795d20b7 bounds semantic target delivery with a FIFO.
+implementation=c0c511f4 adds a one-shot touch activity latch in HalGPIO and marks it from the Kobo touch reader. 795d20b7 bounds semantic target delivery with a FIFO. 8c82cc9b caps battery/USB sysfs polling; afc4e3b2 rate-limits background Wi-Fi service.
 latency_before=
 latency_after=
 tests=Source/diff review; full Kobo compile is blocked on macOS by missing linux/input.h.
 hardware=
-commit=c0c511f4, 795d20b7
-remaining_risk=Wi-Fi cadence/blocking and battery snapshot cadence still require implementation and ARM/N437 validation.
+commit=c0c511f4, 795d20b7, 8c82cc9b, afc4e3b2
+remaining_risk=Wi-Fi scan/DHCP latency and hardware validation remain open.
 ```
 
 ### Fase 5 — webbeveiliging en atomic I/O
