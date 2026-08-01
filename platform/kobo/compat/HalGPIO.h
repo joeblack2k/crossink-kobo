@@ -48,6 +48,12 @@ class HalGPIO {
   void begin();
   void beginFrame();
   void update();
+  void markTouchActivity() { touchActivity_ = true; }
+  [[nodiscard]] bool consumeTouchActivity() {
+    const bool active = touchActivity_;
+    touchActivity_ = false;
+    return active;
+  }
   [[nodiscard]] bool isPressed(std::uint8_t buttonIndex) const;
   [[nodiscard]] bool wasPressed(std::uint8_t buttonIndex) const;
   [[nodiscard]] bool wasAnyPressed() const;
@@ -67,6 +73,7 @@ class HalGPIO {
   crossink::kobo::KoboBatterySysfs battery_;
   bool usbConnected_ = false;
   bool usbChanged_ = false;
+  bool touchActivity_ = false;
 };
 
 extern HalGPIO gpio;

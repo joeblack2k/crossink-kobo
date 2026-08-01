@@ -484,6 +484,7 @@ void updateTouch() {
   bool received = false;
   while (touch.readFrame(frame)) {
     received = true;
+    gpio.markTouchActivity();
     lastTouchFrame = frame;
     haveTouchFrame = true;
     if (frame.discontinuity) {

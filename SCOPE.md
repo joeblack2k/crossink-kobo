@@ -1,12 +1,14 @@
-# Project Vision & Scope: CrossInk
+# Project Vision & Scope: CrossInk-Kobo
 
-The goal of this CrossPoint fork is to provide useful enhancements while still adhering to the core principles of Crosspoint. If you have a major feature request, it should first be directed at the main project since this is a downstream project that consumes their updates.
+The goal of this port is to provide a reliable, source-buildable e-reader firmware for
+the Kobo Glo HD N437. It is a separate hardware target, not an Xteink release.
 
 The content below is taken directly from Crosspoint and aligns with CrossInk's vision as well.
 
 ## 1. Core Mission
 
-To provide a lightweight, high-performance firmware that maximizes the potential of the X4, prioritizing legibility and usability over "swiss-army-knife" functionality.
+To provide a lightweight, low-power firmware that prioritizes legibility, predictable
+sleep/wake behavior and safe local transfer over feature breadth.
 
 ## 2. Scope
 
@@ -31,8 +33,7 @@ To provide a lightweight, high-performance firmware that maximizes the potential
 
 | Device | Scope |
 | -- | -- |
-| X3 | The X3 uses a dedicated DS3231 RTC, which maintains accurate time across sleep cycles and can be treated as a reliable wall clock. |
-| X4 | The X4 relies on the ESP32-C3's internal RTC, which drifts significantly during deep sleep. NTP sync could correct this, with an appropriate user experience around connecting to the internet on wake or on demand. This causes some tension with the **Active Connectivity** section below, so please open a discussion about this UX if it's a feature you would find useful. |
+| Kobo Glo HD N437 | RTC and suspend behavior must be validated on the physical device; no wall-clock accuracy claim is made here. |
 
 ### Out-of-Scope
 

@@ -87,6 +87,8 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "activities/reader/ReadingStatsUtils.h"
 #include "activities/reader/StatsBackup.h"
 #include "activities/settings/KOReaderSettingsActivity.h"
+#include "network/OpdsCoverCache.h"
+#include "network/OpdsOfflineSync.h"
 #include "network/OpdsSyncService.h"
 #include "platform/DeviceCapabilities.h"
 #ifndef KOBO_LINUX
@@ -292,6 +294,12 @@ unsigned long t2 = 0;
 // Set when the screenshot combo (Power + Volume Down) fires, so the subsequent
 // power button release does not also trigger a short-press action (e.g. sleep).
 static bool screenshotComboHandled = false;
+// A power-button wake is delivered by the kernel independently of the event
+// stream consumed by the app.  Ignore that same physical press/release for a
+// short settling window after resume; otherwise it is interpreted as a fresh
+// short press and immediately sends the Kobo back to sleep.
+static unsigned long ignorePowerActionsUntil = 0;
+constexpr unsigned long POWER_WAKE_RELEASE_GUARD_MS = 1250;
 
 const char* resetReasonName(const esp_reset_reason_t reason) {
   switch (reason) {
@@ -504,6 +512,19 @@ bool startGlobalSyncProgress() {
 CrossPointSettings::SHORT_PWRBTN getPowerButtonAction() {
   static bool longPowerButtonHandled = false;
 
+  if (ignorePowerActionsUntil != 0) {
+    const long remaining = static_cast<long>(ignorePowerActionsUntil - millis());
+    if (remaining > 0) {
+      // Consume a delayed release from the wake press, including a release
+      // that arrives after the main loop resumed from /sys/power/state.
+      if (mappedInputManager.wasReleased(MappedInputManager::Button::Power)) {
+        screenshotComboHandled = false;
+      }
+      return CrossPointSettings::SHORT_PWRBTN::IGNORE;
+    }
+    ignorePowerActionsUntil = 0;
+  }
+
   if (mappedInputManager.wasReleased(MappedInputManager::Button::Power)) {
     if (longPowerButtonHandled) {
       longPowerButtonHandled = false;
@@ -537,6 +558,22 @@ CrossPointSettings::SHORT_PWRBTN getPowerButtonAction() {
 
 bool handleGlobalPowerButtonAction(const CrossPointSettings::SHORT_PWRBTN action) {
   switch (action) {
+#ifdef KOBO_LINUX
+    case CrossPointSettings::SHORT_PWRBTN::CYCLE_FRONTLIGHT: {
+      constexpr uint8_t kFrontlightStep = 20;
+      SETTINGS.frontlightBrightness =
+          SETTINGS.frontlightBrightness >= 100 ? 0 : static_cast<uint8_t>(SETTINGS.frontlightBrightness + kFrontlightStep);
+      if (!SETTINGS.saveToFile()) {
+        LOG_ERR("PWR", "Could not persist frontlight brightness");
+      }
+      // The Kobo main loop writes the sysfs brightness immediately before its
+      // next render.  Refresh the current activity so the visible percentage
+      // and status bar cannot lag the physical frontlight.
+      activityManager.requestUpdate();
+      LOG_INF("PWR", "Power-key frontlight=%u", SETTINGS.frontlightBrightness);
+      return true;
+    }
+#endif
     case CrossPointSettings::SHORT_PWRBTN::SLEEP:
       enterDeepSleep();
       return true;
@@ -707,6 +744,7 @@ void enterDeepSleep(bool fromTimeout) {
           suspendResult.entered ? 1 : 0, suspendResult.usedWakeupCount ? 1 : 0, suspendResult.errorNumber,
           suspendResult.detail.c_str());
   deepSleepInProgress = false;
+  ignorePowerActionsUntil = millis() + POWER_WAKE_RELEASE_GUARD_MS;
   OPDS_SYNC.resumeAfterSuspend();
   WiFi.setSleep(false);
   crossink::kobo::setWifiAutoConnectSuspended(false);
@@ -892,6 +930,9 @@ void setup() {
   OPDS_STORE.loadFromFile();
   OPDS_CATALOG.loadFromFile();
 #ifdef KOBO_LINUX
+  // Metadata refresh waits for a saved WLAN connection and never replaces the
+  // current Activity with the old text-only OPDS browser.
+  OPDS_OFFLINE_SYNC.requestCatalogRefresh();
   // A saved Kobo network is product state, not an activity-local connection.
   // Start reconnecting before Home/Reader paints so the web service and its
   // header indicator become available after normal boots.
@@ -1071,6 +1112,14 @@ void loop() {
     activityManager.requestUpdate();
   }
   crossink::kobo::serviceWebTransfer();
+  if (OPDS_OFFLINE_SYNC.tick()) {
+    activityManager.requestUpdate();
+  }
+  // Cover transfers are catalog work, not an activity-local side effect.  A
+  // visible Library page will consume the resulting change on its next loop;
+  // while another activity is open the persisted cover path is ready on the
+  // next Library entry.
+  OPDS_COVER_CACHE.tick();
 #endif
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.tiltPageTurnDirection, SETTINGS.orientation,
                        activityManager.isReaderActivity());
@@ -1102,7 +1151,7 @@ void loop() {
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || halTiltSensor.hadActivity() ||
+  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.consumeTouchActivity() || halTiltSensor.hadActivity() ||
       activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
