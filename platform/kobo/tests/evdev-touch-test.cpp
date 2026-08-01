@@ -12,6 +12,7 @@ using crossink::kobo::KoboEvdevTouch;
 using crossink::kobo::RawAxisRange;
 using crossink::kobo::TouchDeviceInfo;
 using crossink::kobo::TouchFrame;
+using crossink::kobo::TouchReadResult;
 
 namespace {
 
@@ -63,6 +64,10 @@ int main() {
     return EXIT_FAILURE;
   }
   touch.close();
+  if (touch.readFrameDetailed(frame) != TouchReadResult::DeviceLost) {
+    std::remove(path);
+    return EXIT_FAILURE;
+  }
   std::remove(path);
   return EXIT_SUCCESS;
 }
