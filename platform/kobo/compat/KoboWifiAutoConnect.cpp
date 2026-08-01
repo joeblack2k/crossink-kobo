@@ -12,11 +12,13 @@ namespace crossink::kobo {
 namespace {
 constexpr unsigned long kInitialRetryMs = 15'000;
 constexpr unsigned long kMaximumRetryMs = 5UL * 60UL * 1000UL;
+constexpr unsigned long kServiceIntervalMs = 500;
 
 bool initialized = false;
 bool wasConnected = false;
 bool suspended = false;
 unsigned long nextAttemptAt = 0;
+unsigned long nextServiceAt = 0;
 unsigned long retryDelayMs = kInitialRetryMs;
 std::string configuredSsid;
 
@@ -45,6 +47,9 @@ void initializeWifiAutoConnect() {
 
 bool serviceWifiAutoConnect() {
   if (!initialized) initializeWifiAutoConnect();
+  const unsigned long now = millis();
+  if (now < nextServiceAt) return false;
+  nextServiceAt = now + kServiceIntervalMs;
 
   const bool connected = WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
   bool changed = connected != wasConnected;
