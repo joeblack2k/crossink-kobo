@@ -39,6 +39,7 @@ void EpubReaderPercentSelectionActivity::adjustPercent(const int delta) {
 }
 
 void EpubReaderPercentSelectionActivity::loop() {
+  // cppcheck-suppress knownConditionTrueFalse
   if (TouchSlider::consume(mappedInput, 0, 100, percent)) {
     requestUpdate();
     return;

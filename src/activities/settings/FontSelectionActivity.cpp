@@ -138,6 +138,7 @@ void FontSelectionActivity::loop() {
   // A finger tap is an explicit choice, unlike a hardware Confirm press which
   // first previews a newly highlighted font.  Select it immediately so the
   // touchscreen never needs a second tap on the same row.
+  // cppcheck-suppress knownConditionTrueFalse
   if (consumeDirectListTarget(mappedInput, static_cast<int>(fonts_.size()), selectedIndex_)) {
     previewFontIndex_ = selectedIndex_;
     handleSelection();

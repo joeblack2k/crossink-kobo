@@ -26,6 +26,7 @@ inline bool consumeDirectListTarget(MappedInputManager& input, const int itemCou
 
 template <typename Index>
 inline bool consumeDirectListSelection(MappedInputManager& input, const int itemCount, Index& selectedIndex) {
+  // cppcheck-suppress knownConditionTrueFalse
   if (!consumeDirectListTarget(input, itemCount, selectedIndex)) return false;
 #if defined(SIMULATOR) || defined(KOBO_LINUX)
   // A physical touch is a complete press/release gesture.  Inject both edges

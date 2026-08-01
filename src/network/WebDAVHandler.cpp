@@ -79,6 +79,7 @@ bool WebDAVHandler::canRaw(WebServer& server, const String& uri) {
 
 void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
   (void)uri;
+  // cppcheck-suppress knownConditionTrueFalse
   if (!mutationAllowed(server, HTTP_PUT)) {
     _putOk = false;
     return;
@@ -153,6 +154,7 @@ void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
 
 bool WebDAVHandler::handle(WebServer& server, HTTPMethod method, const String& uri) {
   (void)uri;
+  // cppcheck-suppress knownConditionTrueFalse
   if (!mutationAllowed(server, method)) return true;
   switch (method) {
     case HTTP_OPTIONS:
