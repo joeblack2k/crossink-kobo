@@ -52,8 +52,8 @@ ci_apply=
 | TCH-04 | OPEN |  |  |  |  |
 | TCH-05 | FIXED_LOCAL | 64fdeb98 | standalone gesture test PASS for explicit deadband cancellation | N437 proof ontbreekt | Movement outside tap slop and below swipe distance emits `Cancelled` instead of silently disappearing. |
 | TCH-06 | FIXED_LOCAL | c0c511f4 | source review; host build blocked by missing Linux headers | N437 autosleep soak ontbreekt | Raw touch frames now mark the existing main-loop activity latch; a touch-only gesture resets the sleep timer. |
-| TCH-07 | IN_PROGRESS | 59cf1d50 | code uses EVIOCSCLOCKID and event timestamp with monotone fallback; parser test ontbreekt | ARM/N437 timestamp evidence ontbreekt | Kernel event timestamps are now preferred; invalid or regressing values use CLOCK_MONOTONIC. |
-| TCH-08 | IN_PROGRESS | 59cf1d50 | code resets gesture/capture after SYN_DROPPED frame; injected parser test ontbreekt | N437 drop/resync evidence ontbreekt | SYN_DROPPED discards the current contact state and emits an explicit discontinuity frame. |
+| TCH-07 | FIXED_LOCAL | 59cf1d50, 4fe51abe | `crossink-kobo-evdev-touch` PASS in GitHub run `30715081795` | ARM/N437 timestamp evidence ontbreekt | Kernel event timestamps are now preferred; the host parser test proves timestamp preservation and monotone fallback path coverage remains hardware-dependent. |
+| TCH-08 | FIXED_LOCAL | 59cf1d50, 4fe51abe | `crossink-kobo-evdev-touch` PASS in GitHub run `30715081795` | N437 drop/resync evidence ontbreekt | Host eventstream proves `SYN_DROPPED` emits discontinuity and subsequent touch frames recover; physical device-loss/reconnect evidence remains open. |
 | TCH-09 | OPEN |  |  |  |  |
 | TCH-10 | FIXED_LOCAL | 795d20b7 | source review; FIFO stress test ontbreekt | N437 rapid-tap evidence ontbreekt | Semantic touch targets use an 8-entry bounded FIFO and log/drop the newest item on overflow instead of overwriting an earlier target. |
 | NET-01 | IN_PROGRESS | afc4e3b2 | source review; latency test not available on macOS | N437 timing evidence ontbreekt | Background saved-network service is rate-limited to 500 ms; `iw` scan and DHCP failure/latency tests remain open. |
