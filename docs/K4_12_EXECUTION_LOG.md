@@ -62,7 +62,7 @@ ci_apply=
 | SYS-01 | FIXED_LOCAL | 6d181167, 5581dea4 | GitHub Actions run `30716555316` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format | N437 runtime I/O trace ontbreekt | Refresh qualification is cached per profile for the process lifetime and invalidated after a new marker is written; the main loop no longer rereads model, kernel, manifest and marker every frame. |
 | SYS-02 | FIXED_LOCAL | 8c82cc9b | shell/Python checks pass; ARM build unavailable on macOS | N437 power trace ontbreekt | Battery/USB sysfs polling in HalGPIO is capped at one snapshot per second while key input remains per-frame. |
 | NET-02 | OPEN |  |  |  |  |
-| NET-03 | OPEN |  |  |  |  |
+| NET-03 | FIXED_LOCAL | 3ce995d5 | GitHub Actions run `30716683191` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format | N437 radio-current trace ontbreekt | Kobo webserver disables Wi-Fi powersave only while active and restores powersave when stopped; ESP behavior remains unchanged. |
 | WEB-03 | FIXED_LOCAL | d0c28537 | source-level staging/write/sync checks | N437 WebSocket disabled/HTTP fallback proof ontbreekt | WebSocket upload is staged and disabled on Kobo; font upload checks writes and magic before rename. |
 | DSP-01 | OPEN |  |  |  |  |
 | DSP-02 | OPEN |  |  |  |  |
@@ -195,6 +195,18 @@ tests=GitHub Actions run 30716555316: Kobo host, CTest, dependency-audit, cppche
 hardware=Niet uitgevoerd; N437 runtime-I/O en energieprofiel blijven te meten.
 commit=6d181167, 5581dea4
 remaining_risk=Een extern gewijzigde of verwijderde marker wordt pas na procesrestart opnieuw gezien; dat is bewust gekoppeld aan de immutable kernel/binary identity van een firmwareproces.
+```
+
+### Fase 4 vervolg — Wi-Fi powersave rond webtransfer
+
+```text
+status=FIXED_LOCAL
+root_cause=CrossPointWebServer::begin() zette powersave uit voor responsiviteit, maar stop() herstelde de radio-instelling niet.
+implementation=3ce995d5 schakelt op KOBO_LINUX powersave opnieuw in nadat de webserver en transferresources zijn gestopt.
+tests=GitHub Actions run 30716683191: Kobo host, CTest, dependency-audit, cppcheck en clang-format PASS.
+hardware=Niet uitgevoerd; N437 idle/transfer current-draw vergelijking blijft open.
+commit=3ce995d5
+remaining_risk=De effectieve driverstand en batterijwinst moeten op de N437 met wlan0 en suspendmarkers worden gemeten.
 ```
 
 ## Commitlog
