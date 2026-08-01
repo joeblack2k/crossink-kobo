@@ -8,8 +8,8 @@
 #include <KoboEvdevTouch.h>
 #include <KoboRefreshQualification.h>
 #include <KoboSysfs.h>
-#include <KoboTouchLifecycle.h>
 #include <KoboTouchGesture.h>
+#include <KoboTouchLifecycle.h>
 #include <KoboWebTransferService.h>
 #include <MappedInputManager.h>
 #include <activities/Activity.h>
