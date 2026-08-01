@@ -6,6 +6,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -17,12 +18,24 @@ constexpr char kModelPath[] = "/proc/device-tree/model";
 constexpr char kActiveManifestPath[] = "/opt/crossink/current/build-manifest.txt";
 constexpr char kRequiredModelPrefix[] = "Kobo Glo HD";
 constexpr unsigned kPolicyAbi = 1;
+constexpr std::size_t kProfileCount = 2;
 
 struct QualificationPaths {
   const char* finalPath;
   const char* temporaryPath;
   const char* profile;
 };
+
+struct QualificationCache {
+  std::array<bool, kProfileCount> valid{};
+  std::array<bool, kProfileCount> qualified{};
+};
+
+QualificationCache qualificationCache;
+
+std::size_t cacheIndex(const RefreshProfile profile) {
+  return profile == RefreshProfile::Fast ? 0U : 1U;
+}
 
 bool qualificationPaths(const RefreshProfile profile, QualificationPaths& paths) {
   switch (profile) {
@@ -119,6 +132,9 @@ bool activeBinarySha(char* const destination, const std::size_t size) {
 bool koboRefreshProfileQualified(const RefreshProfile profile) {
   QualificationPaths paths{};
   if (!qualificationPaths(profile, paths)) return profile == RefreshProfile::Safe;
+  const std::size_t index = cacheIndex(profile);
+  if (qualificationCache.valid[index]) return qualificationCache.qualified[index];
+  qualificationCache.valid[index] = true;
   if (!n437Model()) return false;
   char kernel[96]{};
   char binarySha[65]{};
@@ -138,12 +154,14 @@ bool koboRefreshProfileQualified(const RefreshProfile profile) {
   const int binaryLength = std::snprintf(expectedBinary, sizeof(expectedBinary), "binary_sha256=%s", binarySha);
   char expectedProfile[40]{};
   const int profileLength = std::snprintf(expectedProfile, sizeof(expectedProfile), "profile=%s", paths.profile);
-  return versionLength > 0 && versionLength < static_cast<int>(sizeof(expectedVersion)) && kernelLength > 0 &&
+  const bool qualified = versionLength > 0 && versionLength < static_cast<int>(sizeof(expectedVersion)) && kernelLength > 0 &&
          kernelLength < static_cast<int>(sizeof(expectedKernel)) && binaryLength > 0 &&
          binaryLength < static_cast<int>(sizeof(expectedBinary)) && profileLength > 0 &&
          profileLength < static_cast<int>(sizeof(expectedProfile)) && containsLine(content, expectedVersion) &&
          containsLine(content, expectedProfile) && containsLine(content, "model=Kobo Glo HD") &&
          containsLine(content, expectedKernel) && containsLine(content, expectedBinary);
+  qualificationCache.qualified[index] = qualified;
+  return qualified;
 }
 
 bool recordKoboRefreshProfileQualification(const RefreshProfile profile) {
@@ -171,6 +189,7 @@ bool recordKoboRefreshProfileQualification(const RefreshProfile profile) {
     (void)::unlink(paths.temporaryPath);
     return false;
   }
+  qualificationCache.valid[cacheIndex(profile)] = false;
   return true;
 }
 
