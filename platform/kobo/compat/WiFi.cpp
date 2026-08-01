@@ -3,7 +3,9 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <ifaddrs.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -159,6 +161,7 @@ wl_status_t WiFiClass::begin(const char* ssid, const char* password) {
   if (ssid == nullptr || ssid[0] == '\0') return status_ = WL_NO_SSID_AVAIL;
   mode(WIFI_STA);
   currentSsid_ = ssid;
+  stopDhcp();
   dhcpAttempted_ = false;
   run("killall wpa_supplicant >/dev/null 2>&1");
   run("ip addr flush dev wlan0 >/dev/null 2>&1");
@@ -186,18 +189,25 @@ wl_status_t WiFiClass::status() {
     // must never make the UI believe that station mode is live: that caused
     // scans to preserve a dead connection and made joining a network fail.
     if (localIP() != IPAddress()) run("ip addr flush dev wlan0 >/dev/null 2>&1");
+    stopDhcp();
     dhcpAttempted_ = false;
     return status_ = WL_IDLE_STATUS;
   }
+  if (dhcpPid_ > 0) {
+    int childStatus = 0;
+    const pid_t result = ::waitpid(dhcpPid_, &childStatus, WNOHANG);
+    if (result == dhcpPid_) dhcpPid_ = -1;
+  }
   if (!dhcpAttempted_) {
     dhcpAttempted_ = true;
-    run("udhcpc -i wlan0 -n -q -t 4 -T 2 >/dev/null 2>&1");
+    startDhcp();
   }
   status_ = localIP() == IPAddress() ? WL_IDLE_STATUS : WL_CONNECTED;
   return status_;
 }
 
 void WiFiClass::disconnect(const bool wifiOff, bool) {
+  stopDhcp();
   run("killall wpa_supplicant >/dev/null 2>&1");
   run("ip addr flush dev wlan0 >/dev/null 2>&1");
   status_ = WL_DISCONNECTED;
@@ -210,6 +220,40 @@ void WiFiClass::disconnect(const bool wifiOff, bool) {
 }
 
 IPAddress WiFiClass::localIP() const { return interfaceAddress(kInterface); }
+
+void WiFiClass::stopDhcp() {
+  if (dhcpPid_ <= 0) return;
+  (void)::kill(dhcpPid_, SIGTERM);
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    const pid_t result = ::waitpid(dhcpPid_, nullptr, WNOHANG);
+    if (result == dhcpPid_ || result < 0) {
+      dhcpPid_ = -1;
+      return;
+    }
+    ::usleep(1000);
+  }
+  (void)::kill(dhcpPid_, SIGKILL);
+  (void)::waitpid(dhcpPid_, nullptr, 0);
+  dhcpPid_ = -1;
+}
+
+void WiFiClass::startDhcp() {
+  if (dhcpPid_ > 0) return;
+  const pid_t child = ::fork();
+  if (child < 0) return;
+  if (child == 0) {
+    const int descriptor = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
+    if (descriptor >= 0) {
+      (void)::dup2(descriptor, STDOUT_FILENO);
+      (void)::dup2(descriptor, STDERR_FILENO);
+      ::close(descriptor);
+    }
+    ::execlp("udhcpc", "udhcpc", "-i", kInterface, "-n", "-q", "-t", "4", "-T", "2", static_cast<char*>(nullptr));
+    _exit(127);
+  }
+  dhcpPid_ = child;
+}
+
 wifi_mode_t WiFiClass::getMode() const {
   if (mode_ == WIFI_OFF && localIP() != IPAddress()) return WIFI_STA;
   return mode_;

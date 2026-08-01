@@ -2,6 +2,7 @@
 
 #include <NetworkClient.h>
 #include <WString.h>
+#include <sys/types.h>
 
 #include <array>
 #include <cstdint>
@@ -90,9 +91,12 @@ class WiFiClass {
   // rather than treating an I/O failure as an empty neighbourhood.
   bool scanFailed_ = false;
   bool dhcpAttempted_ = false;
+  pid_t dhcpPid_ = -1;
   bool autoReconnect_ = false;
 
   bool loadScanResults();
+  void stopDhcp();
+  void startDhcp();
 };
 
 extern WiFiClass WiFi;
