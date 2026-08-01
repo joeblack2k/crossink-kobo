@@ -339,6 +339,12 @@ void CrossPointWebServer::stop() {
   delay(10);
 
   server.reset();
+#ifdef KOBO_LINUX
+  // Keep the radio responsive only while the transfer server is active.
+  // Leaving powersave disabled after leaving the activity costs battery for
+  // the rest of the reader session.
+  WiFi.setSleep(true);
+#endif
   LOG_DBG("WEB", "Web server stopped and deleted");
   LOG_DBG("WEB", "[MEM] Free heap after delete server: %d bytes", ESP.getFreeHeap());
 
