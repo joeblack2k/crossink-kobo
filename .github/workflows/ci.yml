@@ -10,6 +10,16 @@ permissions:
   contents: read
 
 jobs:
+  public-tree-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Scan tracked public tree for credentials
+        run: python3 scripts/ci/scan-public-tree.py
+
   clang-format:
     runs-on: ubuntu-latest
     steps:
@@ -103,6 +113,7 @@ jobs:
       - kobo-host
       - clang-format
       - cppcheck
+      - public-tree-secrets
     if: always()
     runs-on: ubuntu-latest
     steps:

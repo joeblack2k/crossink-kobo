@@ -282,6 +282,18 @@ commit=pending
 remaining_risk=Build/package version, changelog policy and remaining legacy target references require a final release-document audit.
 ```
 
+### Release hygiene — tracked-tree secrets gate
+
+```text
+status=FIXED_LOCAL
+root_cause=Repository and image checks existed, but CI did not independently reject credential material added to the tracked public source tree.
+implementation=scripts/ci/scan-public-tree.py checks all tracked files for sensitive filenames, private-key blocks, common provider tokens and non-placeholder credential assignments. The public-tree-secrets job is included in required Test Status.
+tests=Local scan passed: 1093 tracked paths checked; Python compilation and git diff --check passed.
+hardware=not applicable
+commit=pending
+remaining_risk=This scan is pattern-based and does not replace a physical image scan or secret revocation after an accidental publication.
+```
+
 ## Commitlog
 
 | Commit | Onderwerp | Issue-ID's | Tests |
