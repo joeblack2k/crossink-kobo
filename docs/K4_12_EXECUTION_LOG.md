@@ -165,11 +165,12 @@ remaining_risk=
 
 ```text
 status=CI_GREEN_RELEASE_BLOCKED
-ci_jobs=GitHub Actions run 30714722189: all jobs PASS
-version=
-rc_sha=
-release_decision=
-commit=100d2564, 5e8a5070, 3e3bf97c
+ci_jobs=GitHub Actions run 30715253109: all PR jobs PASS (Kobo host, CTest, dependency audit, clang-format, cppcheck, Test Status)
+version=1.4.0-kobo-beta3 source snapshot; no Beta 4 binary release
+rc_sha=not assigned
+release_decision=nog niet Beta 4; physical N437 gates remain open
+draft_pr=https://github.com/joeblack2k/crossink-kobo/pull/1
+commit=100d2564, 5e8a5070, 3e3bf97c, 4fe51abe, f0699977, 448dcc5a
 ```
 
 ## Commitlog
