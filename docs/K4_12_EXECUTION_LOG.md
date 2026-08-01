@@ -294,6 +294,18 @@ commit=pending
 remaining_risk=This scan is pattern-based and does not replace a physical image scan or secret revocation after an accidental publication.
 ```
 
+### Battery follow-up — restore Wi-Fi powersave after wake
+
+```text
+status=FIXED_LOCAL
+root_cause=enterDeepSleep() restored Wi-Fi with setSleep(false) unconditionally after every Kobo RAM resume, including when the persistent web-transfer service was not running.
+implementation=src/main.cpp now restores powersave after wake unless webTransferRunning() confirms that the persistent transfer server needs an active radio.
+tests=Source review; GitHub Kobo host CI required for compile and regression validation.
+hardware=Niet uitgevoerd; N437 idle-current and post-wake radio-state measurement remain open.
+commit=pending
+remaining_risk=The driver power-save state and battery improvement must be measured on the N437 across sleep/wake and active transfer scenarios.
+```
+
 ## Commitlog
 
 | Commit | Onderwerp | Issue-ID's | Tests |
