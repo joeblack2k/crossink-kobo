@@ -64,6 +64,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include <cstring>
 #ifdef KOBO_LINUX
 #include <KoboSuspendController.h>
+#include <KoboTouchLifecycle.h>
 #include <KoboWebTransferService.h>
 #include <KoboWifiAutoConnect.h>
 #include <WiFi.h>
@@ -695,6 +696,9 @@ void enterDeepSleep(bool fromTimeout) {
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
 #ifdef KOBO_LINUX
+  crossink::kobo::prepareTouchForSuspend();
+#endif
+#ifdef KOBO_LINUX
   crossink::kobo::KoboSuspendController::recordEvent(
       "preparing",
       std::string("reader=") + (APP_STATE.lastSleepFromReader ? "1" : "0") + "; timeout=" + (fromTimeout ? "1" : "0"));
@@ -745,6 +749,10 @@ void enterDeepSleep(bool fromTimeout) {
           suspendResult.entered ? 1 : 0, suspendResult.usedWakeupCount ? 1 : 0, suspendResult.errorNumber,
           suspendResult.detail.c_str());
   deepSleepInProgress = false;
+#ifdef KOBO_LINUX
+  const bool touchReopened = crossink::kobo::resumeTouchAfterSuspend();
+  LOG_INF("SLP", "Kobo touch reopened after suspend: %d", touchReopened ? 1 : 0);
+#endif
   ignorePowerActionsUntil = millis() + POWER_WAKE_RELEASE_GUARD_MS;
   OPDS_SYNC.resumeAfterSuspend();
   WiFi.setSleep(false);

@@ -8,6 +8,7 @@
 #include <KoboEvdevTouch.h>
 #include <KoboRefreshQualification.h>
 #include <KoboSysfs.h>
+#include <KoboTouchLifecycle.h>
 #include <KoboTouchGesture.h>
 #include <KoboWebTransferService.h>
 #include <MappedInputManager.h>
@@ -41,6 +42,7 @@ constexpr char kDevInputPath[] = "/run/crossink-dev-input";
 constexpr char kDevScreenshotPath[] = "/data/.crossink/screenshots/live.pbm";
 std::atomic<bool> running{true};
 crossink::kobo::KoboEvdevTouch touch;
+crossink::kobo::TouchDeviceInfo touchDevice;
 crossink::kobo::KoboTouchGesture gestures;
 crossink::kobo::TouchFrame lastTouchFrame{};
 bool haveTouchFrame = false;
@@ -579,6 +581,35 @@ void syncRefreshProfilePreference() {
 }
 }  // namespace
 
+namespace crossink::kobo {
+
+void prepareTouchForSuspend() {
+  gestures.reset();
+  hasCapturedTouchTarget = false;
+  haveTouchFrame = false;
+  if (hasProvisionalLongPressButton) {
+    mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+  }
+  touch.close();
+}
+
+bool resumeTouchAfterSuspend() {
+  if (touchDevice.path.empty()) return false;
+  const bool reopened = touch.reopen();
+  if (!reopened) {
+    crossink::kobo::TouchDeviceInfo discovered;
+    if (!crossink::kobo::KoboEvdevTouch::discover(discovered) || !touch.open(discovered)) return false;
+    touchDevice = std::move(discovered);
+  }
+  gestures.reset();
+  hasCapturedTouchTarget = false;
+  haveTouchFrame = false;
+  return true;
+}
+
+}  // namespace crossink::kobo
+
 int main() {
   if (std::getenv("CROSSPOINT_SIM_SD") == nullptr) {
     setenv("CROSSPOINT_SIM_SD", "/data", 0);
@@ -591,7 +622,6 @@ int main() {
     std::fprintf(stderr, "[KOBO] no frontlight backlight device discovered\n");
   }
 
-  crossink::kobo::TouchDeviceInfo touchDevice;
   if (crossink::kobo::KoboEvdevTouch::discover(touchDevice)) {
     if (!touch.open(touchDevice)) {
       std::fprintf(stderr, "[KOBO] failed to open touch input %s\n", touchDevice.path.c_str());

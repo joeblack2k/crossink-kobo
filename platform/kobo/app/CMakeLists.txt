@@ -109,6 +109,7 @@ add_executable(crossink-kobo
 	"${CROSSINK_ROOT}/platform/kobo/compat/KoboWebTransferService.cpp"
 )
 target_include_directories(crossink-kobo PRIVATE
+	"${CMAKE_CURRENT_SOURCE_DIR}"
 	"${CROSSINK_ROOT}/platform/kobo/compat"
 	"${CROSSINK_ROOT}/platform/kobo/display"
 	"${CROSSINK_ROOT}/platform/kobo/input"
