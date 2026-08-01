@@ -56,7 +56,7 @@ ci_apply=
 | TCH-08 | FIXED_LOCAL | 59cf1d50, 4fe51abe | `crossink-kobo-evdev-touch` PASS in GitHub run `30715081795` | N437 drop/resync evidence ontbreekt | Host eventstream proves `SYN_DROPPED` emits discontinuity and subsequent touch frames recover; physical device-loss/reconnect evidence remains open. |
 | TCH-09 | FIXED_LOCAL | 5d601a89 | GitHub Actions run `30716861535` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format; EOF/device-loss assertion in evdev test | N437 unplug/reconnect evidence ontbreekt | Typed read results distinguish idle queue, EINTR, resync, device loss and protocol failure; the Kobo loop resets gesture state and retries discovery/open with a 500 ms bound. |
 | TCH-10 | FIXED_LOCAL | 795d20b7, 39bd97cb, 92045ae1, 97579923 | GitHub Actions run `30717384832` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format; bounded FIFO test PASS | N437 rapid-tap evidence ontbreekt | The 8-entry FIFO now survives frame boundaries, preserves FIFO order, rejects the ninth target, and is explicitly cleared on activity transition/suspend; newest overflow is still logged and dropped. |
-| NET-01 | IN_PROGRESS | afc4e3b2 | source review; latency test not available on macOS | N437 timing evidence ontbreekt | Background saved-network service is rate-limited to 500 ms; `iw` scan and DHCP failure/latency tests remain open. |
+| NET-01 | IN_PROGRESS | afc4e3b2, pending | source review; current macOS host build is blocked by missing Linux headers | N437 timing evidence ontbreekt | Saved-network service is rate-limited to 500 ms and DHCP is now launched as a managed child process instead of synchronously from `WiFi.status()`; asynchronous scan and measured latency remain open. |
 | WEB-01 | IN_PROGRESS | d0c28537 | source inspection only; no negative HTTP/WebDAV authorization tests yet | N437 exposure test ontbreekt | Kobo mutating HTTP/WebDAV requests now require the documented USB subnet; WebSocket mutators are not started on Kobo. Token/pairing is not implemented, so broader interface audit remains open. |
 | WEB-02 | FIXED_LOCAL | d0c28537 | source-level atomic staging; failure-injection tests still required | N437 abort/disk-full test ontbreekt | HTTP, WebSocket, font and WebDAV PUT paths stage in same directory and do not remove the prior destination before activation. |
 | SYS-01 | FIXED_LOCAL | 6d181167, 5581dea4 | GitHub Actions run `30716555316` PASS: Kobo host, CTest, dependency-audit, cppcheck en clang-format | N437 runtime I/O trace ontbreekt | Refresh qualification is cached per profile for the process lifetime and invalidated after a new marker is written; the main loop no longer rereads model, kernel, manifest and marker every frame. |
@@ -244,6 +244,18 @@ ci=GitHub Actions run 30717384832 PASS for Kobo host, CTest, dependency-audit, c
 power_source_review=Kobo path writes mem to /sys/power/state, arms /sys/power/wakeup_count when available, masks auxiliary battery/USB wake sources temporarily, enables Wi-Fi powersave, and restores wake-source state after return.
 hardware=No connected N437 detected on the current host; suspend current, wake latency, frontlight restore and 100-cycle soak remain unproven.
 release_decision=nog niet Beta 4; physical N437 and remaining P0/P1/P2 software gates are open.
+```
+
+### Fase 4 vervolg — asynchronous DHCP handoff
+
+```text
+status=IN_PROGRESS
+root_cause=WiFi.status() invoked udhcpc synchronously with up to several seconds of retry timeout, blocking the Kobo main/input loop.
+implementation=The Kobo WiFi compatibility layer now starts udhcpc with fork/exec, polls completion with waitpid(WNOHANG), and terminates/reaps the child on disconnect, association loss or a superseding begin request.
+tests=Local CMake configuration reached the bounded FIFO and other host targets, then hit the known macOS missing Linux headers; GitHub CI is required to compile the KOBO_LINUX path.
+hardware=Niet uitgevoerd; N437 scan/DHCP latency and reconnect evidence blijft open.
+commit=pending
+remaining_risk=The scan path still performs iw parsing synchronously and must be moved behind the same non-blocking lifecycle before NET-01 can be FIXED_LOCAL.
 ```
 
 ## Commitlog
