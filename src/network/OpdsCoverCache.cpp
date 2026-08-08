@@ -32,7 +32,6 @@ namespace {
 constexpr char kCacheRoot[] = "/.crosspoint/opds-covers";
 constexpr uint32_t kFirstRetryMs = 15000;
 constexpr uint32_t kMaximumRetryMs = 5 * 60 * 1000;
-constexpr size_t kMaxChanges = 24;
 
 std::string hashPathComponent(const std::string& value) {
   uint64_t hash = 14695981039346656037ull;
@@ -49,9 +48,7 @@ std::string hashPathComponent(const std::string& value) {
   return result;
 }
 
-bool elapsed(const uint32_t now, const uint32_t deadline) {
-  return static_cast<int32_t>(now - deadline) >= 0;
-}
+bool elapsed(const uint32_t now, const uint32_t deadline) { return static_cast<int32_t>(now - deadline) >= 0; }
 
 uint32_t retryDelay(const uint8_t failures) {
   const uint8_t exponent = std::min<uint8_t>(failures, 5);
@@ -112,6 +109,59 @@ void OpdsCoverCache::request(const std::string& serverId, const OpdsEntry& entry
   }
 }
 
+bool OpdsCoverCache::retry(const std::string& serverId, const std::string& entryId) {
+  const auto found = std::find_if(pending.begin(), pending.end(), [&](const Pending& candidate) {
+    return candidate.serverId == serverId && candidate.entryId == entryId;
+  });
+  if (found == pending.end() || found->state != State::Failed || found->jobId != 0 ||
+      found->stage == Pending::Stage::Done) {
+    return false;
+  }
+  // A prior decode error can leave a validly-downloaded but unsupported or
+  // truncated source behind. A user-requested retry must be a clean fetch,
+  // not an immediate retry of that same bad file.
+  Storage.remove((found->sourcePath + ".part").c_str());
+  Storage.remove(found->sourcePath.c_str());
+  Storage.remove((found->bmpPath + ".part").c_str());
+  Storage.remove(found->bmpPath.c_str());
+  found->failures = 0;
+  found->retryAfterMs = 0;
+  found->stage = Pending::Stage::Fetch;
+  found->state = State::Queued;
+  publishChange(*found);
+  queueFetch(static_cast<size_t>(std::distance(pending.begin(), found)));
+  return true;
+}
+
+size_t OpdsCoverCache::retryFailedForServer(const std::string& serverId) {
+  size_t retried = 0;
+  for (size_t index = 0; index < pending.size(); ++index) {
+    Pending& item = pending[index];
+    if (item.serverId != serverId || item.state != State::Failed || item.jobId != 0 ||
+        item.stage == Pending::Stage::Done) {
+      continue;
+    }
+    Storage.remove((item.sourcePath + ".part").c_str());
+    Storage.remove(item.sourcePath.c_str());
+    Storage.remove((item.bmpPath + ".part").c_str());
+    Storage.remove(item.bmpPath.c_str());
+    item.failures = 0;
+    item.retryAfterMs = 0;
+    item.stage = Pending::Stage::Fetch;
+    item.state = State::Queued;
+    publishChange(item);
+    queueFetch(index);
+    ++retried;
+  }
+  if (retried != 0) LOG_INF("OPDSCOV", "Retrying %u failed covers", static_cast<unsigned>(retried));
+  return retried;
+}
+
+void OpdsCoverCache::publishChange(const Pending& item, const std::string& detail) {
+  changes.push_back(Change{item.serverId, item.entryId, item.state,
+                           item.state == State::Ready ? item.bmpPath : std::string{}, detail});
+}
+
 void OpdsCoverCache::queueFetch(const size_t index) {
   if (index >= pending.size()) return;
   Pending& item = pending[index];
@@ -125,6 +175,7 @@ void OpdsCoverCache::queueFetch(const size_t index) {
   Storage.remove(partPath.c_str());
   item.stage = Pending::Stage::Fetch;
   item.state = State::Downloading;
+  publishChange(item);
   item.jobId = OPDS_SYNC.enqueueCoverFetch(*server, item.coverUrl, partPath);
   if (item.jobId == 0) {
     item.state = State::Failed;
@@ -140,6 +191,7 @@ void OpdsCoverCache::queueConvert(const size_t index) {
   Pending& item = pending[index];
   item.stage = Pending::Stage::Convert;
   item.state = State::Downloading;
+  publishChange(item);
   item.jobId = OPDS_SYNC.enqueueCoverConvert(item.sourcePath, item.bmpPath);
   if (item.jobId == 0) {
     item.state = State::Failed;
@@ -171,8 +223,13 @@ void OpdsCoverCache::tick() {
     if (result.code != OpdsSyncService::ResultCode::Ok) {
       item.state = State::Failed;
       item.retryAfterMs = now + retryDelay(++item.failures);
+      // Failed fetches never retain a partial file. A failed conversion drops
+      // the source as well, so automatic backoff eventually refetches instead
+      // of spinning forever on one malformed payload.
+      Storage.remove((item.sourcePath + ".part").c_str());
+      if (item.stage == Pending::Stage::Convert) Storage.remove(item.sourcePath.c_str());
       const std::string detail = result.detail.empty() ? "cover transfer failed" : result.detail;
-      changes.push_back(Change{item.serverId, item.entryId, item.state, {}, detail});
+      publishChange(item, detail);
       LOG_ERR("OPDSCOV", "Cover job failed for %s: %s", item.entryId.c_str(), detail.c_str());
       continue;
     }
@@ -181,7 +238,8 @@ void OpdsCoverCache::tick() {
       if (!Storage.rename(partPath.c_str(), item.sourcePath.c_str())) {
         item.state = State::Failed;
         item.retryAfterMs = now + retryDelay(++item.failures);
-        changes.push_back(Change{item.serverId, item.entryId, item.state, {}, "cover transfer finalize failed"});
+        Storage.remove(partPath.c_str());
+        publishChange(item, "cover transfer finalize failed");
       } else {
         queueConvert(index);
       }
@@ -190,15 +248,19 @@ void OpdsCoverCache::tick() {
     if (!OPDS_CATALOG.updateCoverBmpPath(item.serverId, item.entryId, item.bmpPath)) {
       item.state = State::Failed;
       item.retryAfterMs = now + retryDelay(++item.failures);
-      changes.push_back(Change{item.serverId, item.entryId, item.state, {}, "cover catalog update failed"});
+      Storage.remove(item.sourcePath.c_str());
+      Storage.remove((item.bmpPath + ".part").c_str());
+      publishChange(item, "cover catalog update failed");
       continue;
     }
     item.state = State::Ready;
     item.stage = Pending::Stage::Done;
-    changes.push_back(Change{item.serverId, item.entryId, item.state, item.bmpPath, {}});
+    publishChange(item);
     LOG_DBG("OPDSCOV", "Ready %s", item.entryId.c_str());
   }
-  if (changes.size() > kMaxChanges) changes.erase(changes.begin(), changes.begin() + (changes.size() - kMaxChanges));
+  // Do not truncate card changes. The grid needs a notification for every
+  // completed cover so a rapid background batch cannot leave early cards
+  // blank until the user happens to reopen the library.
 }
 
 bool OpdsCoverCache::takeChange(Change& change) {

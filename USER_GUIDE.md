@@ -339,7 +339,7 @@ It also interoperates with KOReader apps/devices when they use the same server a
 
 ```bash
 USERNAME="user"
-PASSWORD="<your-sync-password>"
+PASSWORD="pass"
 PASSWORD_MD5="$(printf '%s' "$PASSWORD" | openssl md5 | awk '{print $2}')"
 
 curl -i "https://sync.koreader.rocks/users/create" \
@@ -416,7 +416,7 @@ curl -H "Accept: application/vnd.koreader.v1+json" "http://<server-ip>:17200/hea
 
 ```bash
 USERNAME="user"
-PASSWORD="<your-sync-password>"
+PASSWORD="pass"
 PASSWORD_MD5="$(printf '%s' "$PASSWORD" | openssl md5 | awk '{print $2}')"
 
 curl -i "http://<server-ip>:17200/users/create" \

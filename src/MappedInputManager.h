@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 
+#include "BoundedFifo.h"
 class MappedInputManager {
  public:
   enum class Button { Back, Confirm, Left, Right, Up, Down, Power, PageBack, PageForward };
@@ -51,20 +52,23 @@ class MappedInputManager {
     std::uint32_t generation = 0;
     int x = -1;
     int y = -1;
+    bool longPress = false;
   };
 
   // Platform touch/keyboard adapters inject logical actions here; activities
   // remain independent of evdev, SDL and raw hardware button numbers.
   void injectPress(Button button);
   void injectRelease(Button button);
+  void cancelInjectedPress(Button button);
   void clearInjectedInputFrame();
+  void clearInjectedTouchTargets();
   void injectTouchTarget(unsigned char kind, int primary, int secondary, std::uint32_t generation, int x = -1,
-                         int y = -1);
+                         int y = -1, bool longPress = false);
   bool consumeTouchTarget(TouchTarget& target);
   // A list row published by TouchUiRegistry.  Kobo activities consume this
   // directly instead of replaying X4-style Up/Down presses one frame at a
   // time.  `currentIndex` is retained only for the temporary legacy fallback.
-  bool consumeNavigationTouchTarget(int& targetIndex, int& currentIndex);
+  bool consumeNavigationTouchTarget(int& targetIndex, int& currentIndex, bool* longPress = nullptr);
 #endif
 #ifdef SIMULATOR
   void simulatorInjectPress(Button button) { injectPress(button); }
@@ -85,8 +89,8 @@ class MappedInputManager {
   std::array<bool, BUTTON_COUNT> injectedReleased{};
   std::array<bool, BUTTON_COUNT> injectedHeld{};
   std::array<unsigned long, BUTTON_COUNT> injectedPressStart{};
-  TouchTarget injectedTouchTarget{};
-  bool injectedTouchTargetAvailable = false;
+  static constexpr std::size_t TOUCH_TARGET_QUEUE_CAPACITY = 8;
+  BoundedFifo<TouchTarget, TOUCH_TARGET_QUEUE_CAPACITY> injectedTouchTargets;
 #endif
 
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;

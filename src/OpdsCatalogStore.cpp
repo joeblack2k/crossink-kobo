@@ -7,6 +7,8 @@
 #include <array>
 #include <utility>
 
+#include "OpdsServerStore.h"
+#include "network/OpdsBookStorage.h"
 #include "util/StringUtils.h"
 
 namespace {
@@ -58,10 +60,25 @@ std::string legacyLocalPathFor(const OpdsCatalogBook& book) {
   }
   return {};
 }
+
+std::string stableLocalPathFor(const OpdsCatalogBook& book) {
+  const size_t index = OPDS_STORE.indexForId(book.serverKey);
+  const OpdsServer* const server = OPDS_STORE.getServer(index);
+  if (!server) return {};
+  return OpdsBookStorage::downloadPath(server->id, server->filenameFormat == OpdsFilenameFormat::TITLE_AUTHOR,
+                                       book.entryId, book.title, book.author);
+}
+
+std::string existingLocalPathFor(const OpdsCatalogBook& book) {
+  if (!book.localPath.empty() && Storage.exists(book.localPath.c_str())) return book.localPath;
+  const std::string stablePath = stableLocalPathFor(book);
+  if (!stablePath.empty() && Storage.exists(stablePath.c_str())) return stablePath;
+  return legacyLocalPathFor(book);
+}
 }  // namespace
 
 void OpdsCatalogStore::toJson(JsonDocument& doc) const {
-  doc["version"] = 3;
+  doc["version"] = 5;
   doc["latestSnapshotGeneration"] = latestSnapshotGeneration;
   JsonArray arr = doc["books"].to<JsonArray>();
   for (const auto& book : books) {
@@ -80,6 +97,7 @@ void OpdsCatalogStore::toJson(JsonDocument& doc) const {
     obj["localPath"] = book.localPath;
     obj["coverBmpPath"] = book.coverBmpPath;
     obj["availability"] = availabilityToJson(book.availability);
+    obj["updateAvailable"] = book.updateAvailable;
     obj["remotePresent"] = book.remotePresent;
     obj["snapshotGeneration"] = book.snapshotGeneration;
   }
@@ -88,7 +106,7 @@ void OpdsCatalogStore::toJson(JsonDocument& doc) const {
 bool OpdsCatalogStore::fromJson(JsonVariantConst doc) {
   books.clear();
   const uint32_t storedVersion = doc["version"] | 0u;
-  migrationPending = storedVersion < 3;
+  migrationPending = storedVersion < 5;
   latestSnapshotGeneration = doc["latestSnapshotGeneration"] | 0u;
   JsonArrayConst arr = doc["books"].as<JsonArrayConst>();
   books.reserve(std::min(arr.size(), MAX_BOOKS));
@@ -109,6 +127,7 @@ bool OpdsCatalogStore::fromJson(JsonVariantConst doc) {
     book.localPath = obj["localPath"] | "";
     book.coverBmpPath = obj["coverBmpPath"] | "";
     book.availability = availabilityFromJson(obj["availability"] | "remote");
+    book.updateAvailable = obj["updateAvailable"] | false;
     book.remotePresent = obj["remotePresent"] | true;
     book.snapshotGeneration = obj["snapshotGeneration"] | 0u;
     if (book.serverKey.empty() || book.entryId.empty() || book.title.empty() || book.acquisitionHref.empty()) continue;
@@ -123,7 +142,7 @@ bool OpdsCatalogStore::loadFromFile() {
   migrationPending = false;
   if (!PersistableStore<OpdsCatalogStore>::loadFromFile()) return false;
   if (migrationPending && !saveToFile()) {
-    LOG_ERR("OPDSCAT", "Could not atomically migrate OPDS catalog to v3");
+    LOG_ERR("OPDSCAT", "Could not atomically migrate OPDS catalog to v5");
     return false;
   }
   return true;
@@ -263,6 +282,14 @@ bool OpdsCatalogStore::replaceServerSnapshot(const std::string& serverIdentity, 
       next.localPath = old->localPath;
       next.coverBmpPath = old->coverBmpPath;
       next.availability = old->availability;
+      // `updated` is the OPDS version contract. Some minimal feeds omit it,
+      // so a changed acquisition URL is a conservative fallback. Keep the
+      // old EPUB usable until its verified replacement is published.
+      const bool changedPayload =
+          old->acquisitionHref != entry.href || (!entry.updated.empty() && old->updated != entry.updated);
+      next.updateAvailable =
+          old->updateAvailable ||
+          (changedPayload && old->availability == OpdsCatalogAvailability::AvailableOffline && !old->localPath.empty());
     } else {
       next.localPath = legacyLocalPathFor(next);
       if (!next.localPath.empty()) next.availability = OpdsCatalogAvailability::AvailableOffline;
@@ -290,6 +317,10 @@ bool OpdsCatalogStore::replaceServerSnapshot(const std::string& serverIdentity, 
     }
   }
   books = std::move(nextBooks);
+  // Snapshot replacement used to preserve an old availability bit and its
+  // obsolete unsuffixed path. Reconcile before this single atomic save so a
+  // valid stable path remains offline and a missing EPUB is requeued.
+  reconcileLocalFiles(false);
   if (!saveToFile()) {
     books = previous;
     latestSnapshotGeneration = previousGeneration;
@@ -310,13 +341,23 @@ bool OpdsCatalogStore::markAvailability(const std::string& serverIdentity, const
                       [&](const OpdsCatalogBook& book) { return book.serverKey == key && book.entryId == id; });
     if (it == books.end()) return false;
   }
+  if (availability == OpdsCatalogAvailability::AvailableOffline &&
+      (localPath.empty() || !Storage.exists(localPath.c_str()))) {
+    LOG_ERR("OPDSCAT", "Refusing offline state without EPUB: %s", id.c_str());
+    return false;
+  }
+  const OpdsCatalogBook previous = *it;
   it->availability = availability;
+  if (availability == OpdsCatalogAvailability::AvailableOffline) it->updateAvailable = false;
   if (!localPath.empty()) it->localPath = localPath;
   if (availability != OpdsCatalogAvailability::AvailableOffline &&
       availability != OpdsCatalogAvailability::Downloading) {
     it->localPath.clear();
   }
-  return saveToFile();
+  if (saveToFile()) return true;
+  *it = previous;
+  LOG_ERR("OPDSCAT", "Could not persist availability for %s", id.c_str());
+  return false;
 }
 
 bool OpdsCatalogStore::updateCoverBmpPath(const std::string& serverIdentity, const std::string& entryId,
@@ -334,30 +375,36 @@ bool OpdsCatalogStore::updateCoverBmpPath(const std::string& serverIdentity, con
   return false;
 }
 
-bool OpdsCatalogStore::reconcileLocalFiles() {
+bool OpdsCatalogStore::reconcileLocalFiles(const bool persist) {
+  const auto previous = books;
   bool changed = false;
   for (auto& book : books) {
-    if (book.availability == OpdsCatalogAvailability::RemoteOnly && book.localPath.empty()) {
-      const std::string legacyPath = legacyLocalPathFor(book);
-      if (!legacyPath.empty()) {
-        book.localPath = legacyPath;
+    const std::string resolvedPath = existingLocalPathFor(book);
+    if (!resolvedPath.empty()) {
+      if (book.localPath != resolvedPath || book.availability != OpdsCatalogAvailability::AvailableOffline) {
+        book.localPath = resolvedPath;
         book.availability = OpdsCatalogAvailability::AvailableOffline;
         changed = true;
       }
+      continue;
     }
-    if (book.availability == OpdsCatalogAvailability::AvailableOffline &&
-        (book.localPath.empty() || !Storage.exists(book.localPath.c_str()))) {
+    if (book.availability == OpdsCatalogAvailability::Downloading) {
+      book.availability = OpdsCatalogAvailability::RemoteOnly;
+      // Keep a deterministic final pathname for the queue, but a `.part`
+      // never counts as an offline book. The downloader resumes that part.
+      changed = true;
+      continue;
+    }
+    if (book.availability == OpdsCatalogAvailability::AvailableOffline || !book.localPath.empty()) {
       book.availability = OpdsCatalogAvailability::RemoteOnly;
       book.localPath.clear();
       changed = true;
     }
-    if (book.availability == OpdsCatalogAvailability::Downloading) {
-      book.availability = OpdsCatalogAvailability::RemoteOnly;
-      changed = true;
-    }
   }
-  if (changed && !saveToFile()) {
+  if (changed && persist && !saveToFile()) {
+    books = previous;
     LOG_ERR("OPDSCAT", "Could not persist reconciled OPDS catalog");
+    return false;
   }
   return changed;
 }

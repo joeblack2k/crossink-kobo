@@ -95,17 +95,14 @@ void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const 
   }
 
   const int wifiWidth = wifiIndicatorWidth(metrics);
-  drawWifiIndicator(renderer,
-                    Rect{batteryGroupLeftX - wifiWidth - 4, batteryY, wifiWidth, metrics.batteryHeight});
+  drawWifiIndicator(renderer, Rect{batteryGroupLeftX - wifiWidth - 4, batteryY, wifiWidth, metrics.batteryHeight});
   batteryGroupLeftX -= wifiWidth + 4;
 
   const int maxTitleWidth = std::max(0, batteryGroupLeftX - 20 - titleX);
   auto headerTitle = renderer.truncatedText(kTitleFontId, title, maxTitleWidth, EpdFontFamily::BOLD);
   renderer.drawText(kTitleFontId, titleX, titleY, headerTitle.c_str(), true, EpdFontFamily::BOLD);
-  drawBatteryRight(
-      renderer,
-      Rect{batteryIconX, batteryY, metrics.batteryWidth, metrics.batteryHeight},
-      showBatteryPercentage);
+  drawBatteryRight(renderer, Rect{batteryIconX, batteryY, metrics.batteryWidth, metrics.batteryHeight},
+                   showBatteryPercentage);
   drawTopStatusBarClock(renderer, rect.y, nullptr, readerContext, readerContext ? 0 : kHeaderClockYOffset);
 }
 
@@ -210,10 +207,9 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
         constexpr int sourceIconSize = 32;
         const auto& metrics = UITheme::getInstance().getMetrics();
         const int iconSize = KoboIconMetrics::coverPlaceholderSize(sourceIconSize, coverWidth, metrics.homeCoverHeight);
-        KoboIconMetrics::drawScaledSquare(renderer, CoverIcon,
-                                          tileX + (tileWidth - iconSize) / 2,
-                                          imgY + (metrics.homeCoverHeight / 3 - iconSize) / 2,
-                                          sourceIconSize, iconSize);
+        KoboIconMetrics::drawScaledSquare(renderer, CoverIcon, tileX + (tileWidth - iconSize) / 2,
+                                          imgY + (metrics.homeCoverHeight / 3 - iconSize) / 2, sourceIconSize,
+                                          iconSize);
         renderer.maskRoundedRectOutsideCorners(tileX + (tileWidth - coverWidth) / 2, imgY, coverWidth,
                                                RoundedRaffMetrics::values.homeCoverHeight, kCoverRadius,
                                                Color::LightGray);

@@ -849,8 +849,7 @@ void XtcReaderActivity::renderPage() {
     if (!renderer.supportsStripGrayscale()) {
       ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
       free(pageBuffer);
-      LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit source, Kobo BW fallback)", currentPage + 1,
-              xtc->getPageCount());
+      LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit source, Kobo BW fallback)", currentPage + 1, xtc->getPageCount());
       return;
     }
 

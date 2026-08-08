@@ -119,11 +119,10 @@ bool cachedBmpMatchesDimensions(const std::string& path, const int width, const 
   const int32_t bmpHeight = isBmp ? readLe32(header + 22) : 0;
   const int32_t absHeight = bmpHeight < 0 ? -bmpHeight : bmpHeight;
   const uint16_t bpp = isBmp ? static_cast<uint16_t>(header[28] | (static_cast<uint16_t>(header[29]) << 8)) : 0;
-  const uint64_t rowBytes = bmpWidth > 0 && bpp > 0
-                                ? static_cast<uint64_t>((static_cast<uint64_t>(bmpWidth) * bpp + 31) / 32) * 4
-                                : 0;
-  const bool hasCompletePixelData = rowBytes > 0 && absHeight > 0 &&
-                                    fileSize >= static_cast<uint64_t>(pixelOffset) + rowBytes * absHeight;
+  const uint64_t rowBytes =
+      bmpWidth > 0 && bpp > 0 ? static_cast<uint64_t>((static_cast<uint64_t>(bmpWidth) * bpp + 31) / 32) * 4 : 0;
+  const bool hasCompletePixelData =
+      rowBytes > 0 && absHeight > 0 && fileSize >= static_cast<uint64_t>(pixelOffset) + rowBytes * absHeight;
   const bool exactMatch = isBmp && bmpWidth == width && absHeight == height;
   const bool containedMatch = allowContainedDimensions && isBmp && bmpWidth > 0 && absHeight > 0 && bmpWidth <= width &&
                               absHeight <= height && (bmpWidth == width || absHeight == height);

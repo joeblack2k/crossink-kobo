@@ -1,11 +1,20 @@
 #include "HalGPIO.h"
 
 #include <fcntl.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <cstdio>
 
 HalGPIO gpio;
+
+namespace {
+std::uint64_t monotonicMilliseconds() {
+  timespec now{};
+  if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+  return static_cast<std::uint64_t>(now.tv_sec) * 1000ULL + static_cast<std::uint64_t>(now.tv_nsec) / 1000000ULL;
+}
+}  // namespace
 
 void HalGPIO::begin() {
   crossink::kobo::KeyDeviceInfo powerDevice;
@@ -16,7 +25,11 @@ void HalGPIO::begin() {
     std::fprintf(stderr, "[KOBO] no battery power_supply found\n");
   }
   crossink::kobo::BatterySnapshot snapshot;
-  if (battery_.read(snapshot)) usbConnected_ = snapshot.usbOnline;
+  if (battery_.read(snapshot)) {
+    usbConnected_ = snapshot.usbOnline;
+    haveBatterySnapshot_ = true;
+    lastBatteryReadMs_ = monotonicMilliseconds();
+  }
 }
 
 void HalGPIO::beginFrame() {
@@ -26,11 +39,19 @@ void HalGPIO::beginFrame() {
 
 void HalGPIO::update() {
   powerKey_.update();
+  constexpr std::uint64_t kBatteryPollIntervalMs = 1000;
+  const std::uint64_t now = monotonicMilliseconds();
+  if (haveBatterySnapshot_ && now >= lastBatteryReadMs_ && now - lastBatteryReadMs_ < kBatteryPollIntervalMs) {
+    return;
+  }
   crossink::kobo::BatterySnapshot snapshot;
-  if (battery_.read(snapshot) && snapshot.usbOnline != usbConnected_) {
+  if (!battery_.read(snapshot)) return;
+  if (snapshot.usbOnline != usbConnected_) {
     usbConnected_ = snapshot.usbOnline;
     usbChanged_ = true;
   }
+  haveBatterySnapshot_ = true;
+  lastBatteryReadMs_ = now;
 }
 
 bool HalGPIO::isPressed(const std::uint8_t buttonIndex) const {

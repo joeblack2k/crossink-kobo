@@ -494,7 +494,10 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   if (result != OK) {
     LOG_ERR("HTTP", "Transfer failed: error=%d downloaded=%zu expected=%zu preservePartial=%d resumePartial=%d",
             static_cast<int>(result), sink.downloaded, sink.total, options.preservePartial, options.resumePartial);
-    if (result == ABORTED || !options.preservePartial) {
+    // A Kobo suspend or Wi-Fi interruption must leave a bulk OPDS `.part`
+    // file intact when the caller explicitly requested resumability.  The
+    // caller owns publication; keeping a partial never makes it readable.
+    if (!options.preservePartial) {
       Storage.remove(destPath.c_str());
     }
     return result;

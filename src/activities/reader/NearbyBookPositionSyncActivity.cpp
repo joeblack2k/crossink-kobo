@@ -317,11 +317,13 @@ void NearbyBookPositionSyncActivity::renderComparison() const {
 // The Glo HD has no ESP-NOW radio.  Keep this explicit unavailable adapter
 // separate from the simulator's fake peer flow: a latent action can never
 // invent a remote reader or mutate the current reading position on Kobo.
-NearbyBookPositionSyncActivity::NearbyBookPositionSyncActivity(
-    GfxRenderer& renderer, MappedInputManager& mappedInput, std::shared_ptr<Epub> epub, const std::string& epubPath,
-    int currentSpineIndex, int currentPage, int totalPagesInSpine, KOReaderPosition localKoPos,
-    std::string localChapterName, std::optional<uint16_t> currentParagraphIndex,
-    std::optional<uint16_t> currentListItemIndex)
+NearbyBookPositionSyncActivity::NearbyBookPositionSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                                               std::shared_ptr<Epub> epub, const std::string& epubPath,
+                                                               int currentSpineIndex, int currentPage,
+                                                               int totalPagesInSpine, KOReaderPosition localKoPos,
+                                                               std::string localChapterName,
+                                                               std::optional<uint16_t> currentParagraphIndex,
+                                                               std::optional<uint16_t> currentListItemIndex)
     : Activity("NearbyBookPositionSync", renderer, mappedInput),
       epub_(std::move(epub)),
       epubPath_(epubPath),

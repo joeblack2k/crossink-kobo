@@ -64,6 +64,24 @@ int main() {
   if (TOUCH_UI.forbiddenOverlapCount() != 0) fail("explicit overlap must be exempt");
 
   TOUCH_UI.clear();
+  if (!TOUCH_UI.registerDirect(10, 10, 100, 100, TouchUiRegistry::TargetKind::Tab, 11)) {
+    fail("active frame registration");
+  }
+  const auto committedGeneration = TOUCH_UI.generation();
+  TOUCH_UI.beginFrame();
+  if (!TOUCH_UI.registerDirect(200, 10, 100, 100, TouchUiRegistry::TargetKind::Tab, 22)) {
+    fail("staging registration");
+  }
+  if (!TOUCH_UI.resolve(50, 50).found || TOUCH_UI.resolve(250, 50).found) {
+    fail("staging must not leak into active frame");
+  }
+  TOUCH_UI.commitFrame();
+  const auto committed = TOUCH_UI.resolve(250, 50);
+  if (!committed.found || committed.targetIndex != 22 || committed.generation == committedGeneration) {
+    fail("committed frame");
+  }
+
+  TOUCH_UI.clear();
   if (TOUCH_UI.size() != 0 || TOUCH_UI.resolve(100, 220).found || TOUCH_UI.generation() == firstGeneration) {
     fail("clear stale rows or generation");
   }

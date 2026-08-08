@@ -7,13 +7,28 @@
 namespace crossink::kobo {
 
 enum class TouchContext : std::uint8_t { Navigation, Reader, Dialog, Keyboard };
-enum class TouchAction : std::uint8_t { None, UiItem, Back, Confirm, Left, Right, Up, Down, PageBack, PageForward };
+enum class TouchAction : std::uint8_t {
+  None,
+  UiItem,
+  Cancelled,
+  Back,
+  Confirm,
+  Left,
+  Right,
+  Up,
+  Down,
+  PageBack,
+  PageForward
+};
+
+enum class TouchGesture : std::uint8_t { None, Start, Tap, LongPressStart, LongPressEnd, Swipe, Cancelled };
 
 struct TouchDispatch {
   TouchAction action = TouchAction::None;
   bool press = false;
   bool release = false;
   TouchPoint point{};
+  TouchGesture gesture = TouchGesture::None;
 };
 
 class KoboTouchGesture {
@@ -25,6 +40,7 @@ class KoboTouchGesture {
 
   [[nodiscard]] TouchDispatch update(const TouchFrame& frame, TouchContext context, std::int32_t screenWidth,
                                      std::int32_t screenHeight);
+  [[nodiscard]] bool isActive() const { return active_; }
   void reset();
 
  private:

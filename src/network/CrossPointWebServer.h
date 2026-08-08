@@ -5,6 +5,7 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -81,6 +82,7 @@ class CrossPointWebServer {
   uint16_t wsPort = 81;  // WebSocket port
   NetworkUDP udp;
   bool udpActive = false;
+  [[nodiscard]] bool mutationAllowed() const;
 
   // WebSocket upload state
   void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
@@ -126,8 +128,11 @@ class CrossPointWebServer {
     HalFile file;
     std::string familyName;
     std::string filePath;
+    std::string temporaryPath;
     bool valid = false;
     bool magicChecked = false;
+    std::array<uint8_t, 8> magicPrefix{};
+    size_t magicBytes = 0;
     size_t bytesWritten = 0;
     static constexpr size_t BUFFER_SIZE = 4096;
     std::vector<uint8_t> buffer;

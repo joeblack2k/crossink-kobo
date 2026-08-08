@@ -2,6 +2,7 @@
 
 #include <NetworkClient.h>
 #include <WString.h>
+#include <sys/types.h>
 
 #include <array>
 #include <cstdint>
@@ -85,10 +86,20 @@ class WiFiClass {
   std::string hostname_ = "crossink-n437";
   std::vector<Network> networks_;
   bool scanPending_ = false;
+  // Keep an unsuccessful driver scan distinct from a successful scan with no
+  // visible APs.  The activity can then leave the previous radio state alone
+  // rather than treating an I/O failure as an empty neighbourhood.
+  bool scanFailed_ = false;
+  pid_t scanPid_ = -1;
   bool dhcpAttempted_ = false;
+  pid_t dhcpPid_ = -1;
   bool autoReconnect_ = false;
 
   bool loadScanResults();
+  void stopScan();
+  void startScan();
+  void stopDhcp();
+  void startDhcp();
 };
 
 extern WiFiClass WiFi;

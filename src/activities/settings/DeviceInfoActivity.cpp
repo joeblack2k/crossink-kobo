@@ -16,7 +16,6 @@
 
 #ifdef KOBO_LINUX
 #include <WiFi.h>
-
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
 #endif
@@ -52,7 +51,7 @@ void DeviceInfoActivity::refreshLines() {
   utsname kernel{};
   if (uname(&kernel) == 0) lines.emplace_back(std::string("Kernel: ") + kernel.release);
 
-  struct statvfs storage {};
+  struct statvfs storage{};
   if (statvfs("/data", &storage) == 0) {
     const unsigned long long total = static_cast<unsigned long long>(storage.f_blocks) * storage.f_frsize;
     const unsigned long long free = static_cast<unsigned long long>(storage.f_bavail) * storage.f_frsize;

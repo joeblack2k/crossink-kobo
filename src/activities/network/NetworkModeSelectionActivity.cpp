@@ -83,12 +83,11 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
   const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
   // Menu items and descriptions
   static constexpr StrId menuItems[MENU_ITEM_CAPACITY] = {StrId::STR_JOIN_NETWORK, StrId::STR_CALIBRE_WIRELESS,
-                                                           StrId::STR_CREATE_HOTSPOT, StrId::STR_NEARBY_STATS_SYNC};
+                                                          StrId::STR_CREATE_HOTSPOT, StrId::STR_NEARBY_STATS_SYNC};
   static constexpr StrId menuDescs[MENU_ITEM_CAPACITY] = {StrId::STR_JOIN_DESC, StrId::STR_CALIBRE_DESC,
-                                                           StrId::STR_HOTSPOT_DESC,
-                                                           StrId::STR_NEARBY_STATS_SYNC_DESC};
+                                                          StrId::STR_HOTSPOT_DESC, StrId::STR_NEARBY_STATS_SYNC_DESC};
   static constexpr UIIcon menuIcons[MENU_ITEM_CAPACITY] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot,
-                                                            UIIcon::Transfer};
+                                                           UIIcon::Transfer};
 
   GUI.drawList(
       renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(MENU_ITEM_COUNT), selectedIndex,

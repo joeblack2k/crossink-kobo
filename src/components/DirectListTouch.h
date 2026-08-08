@@ -7,11 +7,12 @@
 // every list keeps ownership of its selection and action semantics while Kobo
 // avoids replaying visible X4-style Up/Down steps.
 template <typename Index>
-inline bool consumeDirectListTarget(MappedInputManager& input, const int itemCount, Index& selectedIndex) {
+inline bool consumeDirectListTarget(MappedInputManager& input, const int itemCount, Index& selectedIndex,
+                                    bool* longPress = nullptr) {
 #if defined(SIMULATOR) || defined(KOBO_LINUX)
   int targetIndex = 0;
   int ignoredCurrentIndex = 0;
-  if (!input.consumeNavigationTouchTarget(targetIndex, ignoredCurrentIndex)) return false;
+  if (!input.consumeNavigationTouchTarget(targetIndex, ignoredCurrentIndex, longPress)) return false;
   if (itemCount <= 0 || targetIndex < 0 || targetIndex >= itemCount) return false;
 
   selectedIndex = static_cast<Index>(targetIndex);
@@ -25,8 +26,10 @@ inline bool consumeDirectListTarget(MappedInputManager& input, const int itemCou
 }
 
 template <typename Index>
-inline bool consumeDirectListSelection(MappedInputManager& input, const int itemCount, Index& selectedIndex) {
-  if (!consumeDirectListTarget(input, itemCount, selectedIndex)) return false;
+inline bool consumeDirectListSelection(MappedInputManager& input, const int itemCount, Index& selectedIndex,
+                                       bool* longPress = nullptr) {
+  // cppcheck-suppress knownConditionTrueFalse
+  if (!consumeDirectListTarget(input, itemCount, selectedIndex, longPress)) return false;
 #if defined(SIMULATOR) || defined(KOBO_LINUX)
   // A physical touch is a complete press/release gesture.  Inject both edges
   // so legacy activities that deliberately keep their action in the existing
@@ -34,8 +37,10 @@ inline bool consumeDirectListSelection(MappedInputManager& input, const int item
   // release-only synthetic edge was dropped by a subset of activities on the
   // native Kobo event loop, leaving a row visibly selected but requiring a
   // second tap on the footer to activate it.
-  input.injectPress(MappedInputManager::Button::Confirm);
-  input.injectRelease(MappedInputManager::Button::Confirm);
+  if (longPress == nullptr || !*longPress) {
+    input.injectPress(MappedInputManager::Button::Confirm);
+    input.injectRelease(MappedInputManager::Button::Confirm);
+  }
 #endif
   return true;
 }

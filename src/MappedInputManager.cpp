@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <utility>
 
 #include "CrossPointSettings.h"
@@ -410,42 +411,53 @@ void MappedInputManager::injectRelease(Button button) {
   injectedHeld[idx] = false;
 }
 
+void MappedInputManager::cancelInjectedPress(const Button button) {
+  const size_t idx = buttonIndex(button);
+  injectedPressed[idx] = false;
+  injectedReleased[idx] = false;
+  injectedHeld[idx] = false;
+}
+
 void MappedInputManager::clearInjectedInputFrame() {
   injectedPressed.fill(false);
   injectedReleased.fill(false);
-  // Touch targets are one-frame messages.  Button edges and a direct target
-  // are both injected before Activity::loop(); keeping an unconsumed target
-  // for another frame could execute an action after the activity/modal that
-  // published it has already changed.
-  injectedTouchTargetAvailable = false;
 }
 
+void MappedInputManager::clearInjectedTouchTargets() { injectedTouchTargets.clear(); }
+
 void MappedInputManager::injectTouchTarget(const unsigned char kind, const int primary, const int secondary,
-                                           const std::uint32_t generation, const int x, const int y) {
-  injectedTouchTarget = {kind, primary, secondary, generation, x, y};
-  injectedTouchTargetAvailable = true;
+                                           const std::uint32_t generation, const int x, const int y,
+                                           const bool longPress) {
+  if (!injectedTouchTargets.push({kind, primary, secondary, generation, x, y, longPress})) {
+    std::fprintf(stderr, "[KOBO] semantic touch target queue overflow; dropping newest target\n");
+    return;
+  }
 }
 
 bool MappedInputManager::consumeTouchTarget(TouchTarget& target) {
-  if (!injectedTouchTargetAvailable) return false;
-  target = injectedTouchTarget;
-  injectedTouchTargetAvailable = false;
+  if (!injectedTouchTargets.pop(target)) return false;
   // A direct target represents one rendered visual state. Once an activity
   // acts on it, invalidate every remaining hitbox immediately rather than
   // waiting for the asynchronous e-ink render to begin. This closes the
   // interval in which a rapid second tap could resolve an old screen.
-  TOUCH_UI.clear();
+  if (target.generation != TOUCH_UI.generation()) return false;
+  TOUCH_UI.invalidate();
   return true;
 }
 
-bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& currentIndex) {
-  if (!injectedTouchTargetAvailable ||
-      injectedTouchTarget.kind != static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) return false;
-  targetIndex = injectedTouchTarget.primary;
-  currentIndex = injectedTouchTarget.secondary;
-  injectedTouchTargetAvailable = false;
+bool MappedInputManager::consumeNavigationTouchTarget(int& targetIndex, int& currentIndex, bool* longPress) {
+  const TouchTarget* queued = injectedTouchTargets.front();
+  if (queued == nullptr || queued->kind != static_cast<unsigned char>(TouchUiRegistry::TargetKind::NavigationItem)) {
+    return false;
+  }
+  TouchTarget target{};
+  (void)injectedTouchTargets.pop(target);
+  targetIndex = target.primary;
+  currentIndex = target.secondary;
+  if (longPress != nullptr) *longPress = target.longPress;
   // See consumeTouchTarget(): no second activation may use a previous render.
-  TOUCH_UI.clear();
+  if (target.generation != TOUCH_UI.generation()) return false;
+  TOUCH_UI.invalidate();
   return true;
 }
 #endif

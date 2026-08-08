@@ -57,11 +57,15 @@ class OpdsSyncService {
 
   static OpdsSyncService& getInstance();
 
-  uint64_t enqueueCatalogRefresh(const OpdsServer& server, std::string url);
+  // `catalogOnly` follows the standard root-feed "All Books" relation before
+  // collecting paginated book entries. Interactive browser requests retain
+  // the root feed unchanged.
+  uint64_t enqueueCatalogRefresh(const OpdsServer& server, std::string url, bool catalogOnly = false);
   uint64_t enqueueBookDownload(const OpdsServer& server, std::string url, std::string destinationPath);
   // A bulk offline copy must never queue-jump visible cover work or an
   // explicit user-initiated book open.
-  uint64_t enqueueBulkBookDownload(const OpdsServer& server, std::string url, std::string destinationPath);
+  uint64_t enqueueBulkBookDownload(const OpdsServer& server, std::string url, std::string destinationPath,
+                                   bool resumePartial = true);
   uint64_t enqueueCoverFetch(const OpdsServer& server, std::string url, std::string destinationPath);
   uint64_t enqueueCoverConvert(std::string sourcePath, std::string destinationPath);
   uint64_t enqueueLocalCover(std::string sourcePath);

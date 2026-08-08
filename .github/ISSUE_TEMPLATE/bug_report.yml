@@ -14,6 +14,7 @@ body:
       label: Device
       description: Which device is this affecting?
       options:
+        - Kobo Glo HD N437
         - X4
         - X3
         - Both

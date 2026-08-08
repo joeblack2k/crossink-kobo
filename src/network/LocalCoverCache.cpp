@@ -22,9 +22,7 @@ constexpr uint32_t kFirstRetryMs = 15000;
 constexpr uint32_t kMaximumRetryMs = 5 * 60 * 1000;
 constexpr size_t kMaxChanges = 24;
 
-bool elapsed(const uint32_t now, const uint32_t deadline) {
-  return static_cast<int32_t>(now - deadline) >= 0;
-}
+bool elapsed(const uint32_t now, const uint32_t deadline) { return static_cast<int32_t>(now - deadline) >= 0; }
 
 uint32_t retryDelay(const uint8_t failures) {
   const uint8_t exponent = std::min<uint8_t>(failures, 5);
@@ -39,9 +37,8 @@ LocalCoverCache& LocalCoverCache::getInstance() {
 
 void LocalCoverCache::request(const std::string& bookPath) {
   if (bookPath.empty() || !Storage.exists(bookPath.c_str())) return;
-  const auto found = std::find_if(pending.begin(), pending.end(), [&](const Pending& item) {
-    return item.bookPath == bookPath;
-  });
+  const auto found =
+      std::find_if(pending.begin(), pending.end(), [&](const Pending& item) { return item.bookPath == bookPath; });
   if (found != pending.end()) return;
   Pending item;
   item.bookPath = bookPath;

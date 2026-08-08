@@ -216,7 +216,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .textFieldNormalThickness = 1,
                                  .textFieldCursorThickness = 3,
                                  .textFieldLineEndOffset = 0};
-}
+}  // namespace BaseMetrics
 
 class BaseTheme {
  public:
@@ -233,8 +233,8 @@ class BaseTheme {
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4, bool allowInvertedText = false) const;
 #ifdef KOBO_LINUX
-  void drawKoboTouchFrame(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
-                          const char* btn4, bool allowInvertedText) const;
+  void drawKoboTouchFrame(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3, const char* btn4,
+                          bool allowInvertedText) const;
 #endif
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
   virtual void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,

@@ -1,10 +1,7 @@
-# CrossInk Kobo
-
-> **Kobo port:** This repository contains the custom CrossInk firmware and Linux/Buildroot port for the Kobo Glo HD N437. The shared reader code originated in CrossPoint Reader; the Xteink ESP32 workflows described below are not the target of this repository.
+> **CrossInk-Kobo is an experimental source-only port for the Kobo Glo HD N437.**
 >
-> **Public-source boundary:** local hardware evidence, build output, private SSH keys, and prebuilt firmware images are intentionally excluded. Build the Kobo firmware from source using the Kobo documentation in this repository.
-
-> **This is a personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)** with a focus on improved fonts and minimal reading stats.
+> This repository does not publish prebuilt firmware images. A device-specific image
+> must be built locally from the documented source and verified on the target device.
 
 ## What's different in this fork
 
@@ -25,7 +22,8 @@ My goal with this fork was to maintain the core Crosspoint firmware while integr
 
 ---
 
-**Note**: This firmware is confirmed to be working on both the X3 and X4.
+**Hardware status**: Kobo Glo HD N437 is the current target. Beta 4 is not a release
+claim yet; power management, input, network and hardware soak gates remain in progress.
 
 ### Highlights
 
@@ -53,16 +51,16 @@ My goal with this fork was to maintain the core Crosspoint firmware while integr
 - Reading [progress sync](./docs/nearby-position-sync.md) between two CrossInk devices.
 - Added customizable Auto Page Turn Interval (anything between 5-120 seconds).
 - Added ability to view Recent Books as a 3x3 grid view.
-- To view a more detailed list for each version, visit the [releases](https://github.com/uxjulia/CrossInk/releases) page to read release notes.
+- Release notes describe source changes only until a reproducible, device-tested release is approved.
 
 ---
 
 ### Reader Fonts
 
-The default fonts have been replaced with Lexend Deca and Bitter. These fonts have been chosen specifically to improve reading fluency and e-ink performance. These 'sturdier' typefaces feature uniform stroke weights and open geometries, allowing the X4/X3 to render crisp, high-contrast text with font-aliasing on while significantly reducing ghosting and artifacts.
+The default fonts have been replaced with Lexend Deca and Bitter. These fonts have been chosen specifically to improve reading fluency and e-ink performance. These 'sturdier' typefaces feature uniform stroke weights and open geometries, allowing the supported e-ink targets to render crisp, high-contrast text with font-aliasing on while significantly reducing ghosting and artifacts.
 
 - [Lexend Deca](https://fonts.google.com/specimen/Lexend+Deca) - A research-backed sans-serif typeface designed to improve reading fluency. Lexend was engineered based on the theory that reading issues are often a design problem (visual crowding) rather than a cognitive one.
-- [Bitter](https://fonts.google.com/specimen/Bitter) - A "contemporary" slab serif typeface for text, it is specially designed for comfortably reading on digital screens. The consistent stroke weight of Bitter helps it render particularly well on e-ink devices. The medium weight has been chosen specifically for improved rendering on the X4/X3.
+- [Bitter](https://fonts.google.com/specimen/Bitter) - A "contemporary" slab serif typeface for text, it is specially designed for comfortably reading on digital screens. The consistent stroke weight of Bitter helps it render particularly well on e-ink devices. The medium weight has been chosen specifically for improved rendering on the supported Kobo and legacy ESP32 e-ink targets.
 
 The UI now uses [Inter](https://fonts.google.com/specimen/Inter) as the display font which has improved readability at smaller sizes.
 
@@ -106,7 +104,7 @@ CrossInk runs on an ESP32-C3 with limited RAM, so very large folders or complex 
 
 ## Development Device Simulator
 
-The [device simulator](https://github.com/uxjulia/crosspoint-simulator) renders the e-ink display in an SDL2 window so firmware changes can be sanity-checked without flashing hardware.
+The device simulator renders the e-ink display in an SDL2 window so firmware changes can be sanity-checked without flashing hardware.
 
 See [Simulator](./docs/simulator.md) for setup, platform notes, keyboard controls, and cache tips.
 
@@ -114,7 +112,8 @@ See [Simulator](./docs/simulator.md) for setup, platform notes, keyboard control
 
 ## Installation
 
-Download a `firmware-*.bin` from the [releases page](https://github.com/uxjulia/CrossInk/releases), then flash it with the web installer or command line.
+There is currently no supported public binary download or web installer for the Kobo port.
+Build instructions and hardware prerequisites are documented in [Kobo build](./docs/kobo-build.md).
 
 See [Installation](./docs/installation.md) for step-by-step flashing and revert instructions.
 
@@ -139,16 +138,18 @@ See [Installation](./docs/installation.md) for step-by-step flashing and revert 
 
 ## Development quick start
 
-CrossInk uses PlatformIO for building and flashing firmware.
+The legacy ESP32 targets use PlatformIO. The Kobo target uses the Buildroot/CMake flow
+described in [Kobo build](./docs/kobo-build.md).
 
 See [Getting Started](./docs/contributing/getting-started.md) for prerequisites, clone setup, hooks, and validation commands.
 
 ### Build / flash / monitor
 
-Connect your Xteink X4 or X3 via USB-C and run:
+For Kobo development, build the image locally and deploy only after checking the target
+model and recovery path:
 
 ```sh
-pio run -e tiny --target upload
+./scripts/kobo/build-image.sh
 ```
 
 Replace `tiny` with another build variant if needed. See [Font Build Variants](./docs/font-build-variants.md).

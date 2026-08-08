@@ -9,6 +9,7 @@
 #include <KoboRefreshQualification.h>
 #include <KoboSysfs.h>
 #include <KoboTouchGesture.h>
+#include <KoboTouchLifecycle.h>
 #include <KoboWebTransferService.h>
 #include <MappedInputManager.h>
 #include <activities/Activity.h>
@@ -41,9 +42,15 @@ constexpr char kDevInputPath[] = "/run/crossink-dev-input";
 constexpr char kDevScreenshotPath[] = "/data/.crossink/screenshots/live.pbm";
 std::atomic<bool> running{true};
 crossink::kobo::KoboEvdevTouch touch;
+crossink::kobo::TouchDeviceInfo touchDevice;
 crossink::kobo::KoboTouchGesture gestures;
 crossink::kobo::TouchFrame lastTouchFrame{};
 bool haveTouchFrame = false;
+TouchUiRegistry::Resolution capturedTouchTarget{};
+bool hasCapturedTouchTarget = false;
+bool hasCapturedLongPressTarget = false;
+MappedInputManager::Button provisionalLongPressButton = MappedInputManager::Button::Confirm;
+bool hasProvisionalLongPressButton = false;
 crossink::kobo::KoboFrontlightSysfs frontlight;
 int appliedFrontlight = -1;
 int appliedOrientation = -1;
@@ -55,6 +62,7 @@ std::array<char, 512> devInputCommand{};
 std::size_t devInputCommandLength = 0;
 std::optional<MappedInputManager::Button> pendingDevButtonRelease;
 std::uintptr_t applicationImageBase = 0;
+unsigned long nextTouchReconnectAt = 0;
 
 void stop(int /*signal*/) { running.store(false); }
 
@@ -150,6 +158,8 @@ MappedInputManager::Button mappedButton(const crossink::kobo::TouchAction action
   switch (action) {
     case Action::UiItem:
       break;
+    case Action::Cancelled:
+      break;
     case Action::Back:
       return MappedInputManager::Button::Back;
     case Action::Confirm:
@@ -173,14 +183,74 @@ MappedInputManager::Button mappedButton(const crossink::kobo::TouchAction action
 }
 
 void dispatch(const crossink::kobo::TouchDispatch event) {
-  if (event.action == crossink::kobo::TouchAction::None) return;
+  using TouchGesture = crossink::kobo::TouchGesture;
+  const bool targetAction = event.action == crossink::kobo::TouchAction::UiItem ||
+                            event.action == crossink::kobo::TouchAction::Confirm ||
+                            event.action == crossink::kobo::TouchAction::Back;
+
+  if (event.gesture == TouchGesture::Start && targetAction) {
+    const auto target = hasCapturedTouchTarget && capturedTouchTarget.generation == TOUCH_UI.generation()
+                            ? capturedTouchTarget
+                            : TOUCH_UI.resolve(event.point.x, event.point.y);
+    if (target.found) {
+      provisionalLongPressButton = event.action == crossink::kobo::TouchAction::Back
+                                       ? MappedInputManager::Button::Back
+                                       : MappedInputManager::Button::Confirm;
+      mappedInputManager.injectPress(provisionalLongPressButton);
+      hasProvisionalLongPressButton = true;
+    }
+    return;
+  }
+
+  if (event.gesture == TouchGesture::LongPressStart && hasCapturedTouchTarget &&
+      capturedTouchTarget.generation == TOUCH_UI.generation()) {
+    mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+    mappedInputManager.injectTouchTarget(
+        static_cast<unsigned char>(capturedTouchTarget.kind), capturedTouchTarget.targetIndex,
+        capturedTouchTarget.kind == TouchUiRegistry::TargetKind::NavigationItem ? capturedTouchTarget.currentIndex
+                                                                                : capturedTouchTarget.secondaryTarget,
+        capturedTouchTarget.generation, event.point.x, event.point.y, true);
+    hasCapturedLongPressTarget = true;
+    return;
+  }
+
+  if (event.gesture == TouchGesture::LongPressEnd && hasCapturedLongPressTarget) {
+    hasCapturedLongPressTarget = false;
+    hasCapturedTouchTarget = false;
+    return;
+  }
+
+  if (event.gesture == TouchGesture::Tap && hasProvisionalLongPressButton) {
+    mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+  } else if (event.gesture == TouchGesture::LongPressEnd && hasProvisionalLongPressButton) {
+    mappedInputManager.injectRelease(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+    hasCapturedTouchTarget = false;
+    return;
+  } else if ((event.gesture == TouchGesture::Swipe || event.gesture == TouchGesture::Cancelled) &&
+             hasProvisionalLongPressButton) {
+    mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+  }
+  if (event.gesture == TouchGesture::Swipe || event.gesture == TouchGesture::Cancelled) {
+    hasCapturedLongPressTarget = false;
+  }
+
+  if (event.action == crossink::kobo::TouchAction::None || event.action == crossink::kobo::TouchAction::Cancelled) {
+    return;
+  }
 
   // A renderer-published hitbox is the authoritative action for the pixels
   // the user touched. In particular, Home places Settings in the left half
   // of the permanent bottom frame; the generic gesture mapper calls that
   // half Back. Resolve the visual target first so a visible button can never
   // be shadowed by the X4-compatible Back/Confirm fallback.
-  const auto visualTarget = TOUCH_UI.resolve(event.point.x, event.point.y);
+  const auto visualTarget =
+      targetAction && hasCapturedTouchTarget && capturedTouchTarget.generation == TOUCH_UI.generation()
+          ? capturedTouchTarget
+          : (targetAction ? TOUCH_UI.resolve(event.point.x, event.point.y) : TouchUiRegistry::Resolution{});
   if (visualTarget.found) {
     if (event.release) {
       std::fprintf(stderr, "[KOBO] touch resolve x=%d y=%d found=1 kind=%u current=%d target=%d count=%d\n",
@@ -192,18 +262,21 @@ void dispatch(const crossink::kobo::TouchDispatch event) {
                                                : visualTarget.secondaryTarget,
                                            visualTarget.generation, event.point.x, event.point.y);
     }
+    if (event.release) hasCapturedTouchTarget = false;
     return;
   }
 
   if (event.action == crossink::kobo::TouchAction::UiItem) {
     if (event.release) {
       std::fprintf(stderr, "[KOBO] touch resolve x=%d y=%d found=0\n", event.point.x, event.point.y);
+      hasCapturedTouchTarget = false;
     }
     return;
   }
   const auto button = mappedButton(event.action);
   if (event.press) mappedInputManager.injectPress(button);
   if (event.release) mappedInputManager.injectRelease(button);
+  if (event.release) hasCapturedTouchTarget = false;
 }
 
 bool initializeDevInput() {
@@ -466,11 +539,47 @@ void updateTouch() {
   if (processDevInput(context, screenWidth, screenHeight)) return;
   crossink::kobo::TouchFrame frame{};
   bool received = false;
-  while (touch.readFrame(frame)) {
+  while (true) {
+    const auto readResult = touch.readFrameDetailed(frame);
+    if (readResult == crossink::kobo::TouchReadResult::WouldBlock) break;
+    if (readResult == crossink::kobo::TouchReadResult::Interrupted) continue;
+    if (readResult == crossink::kobo::TouchReadResult::DeviceLost ||
+        readResult == crossink::kobo::TouchReadResult::ProtocolError) {
+      touch.close();
+      gestures.reset();
+      hasCapturedTouchTarget = false;
+      if (millis() >= nextTouchReconnectAt) {
+        crossink::kobo::TouchDeviceInfo discovered;
+        if (crossink::kobo::KoboEvdevTouch::discover(discovered) && touch.open(discovered)) {
+          touchDevice = std::move(discovered);
+          std::fprintf(stderr, "[KOBO] touch input reconnected\n");
+        }
+        nextTouchReconnectAt = millis() + 500;
+      }
+      break;
+    }
     received = true;
+    gpio.markTouchActivity();
     lastTouchFrame = frame;
     haveTouchFrame = true;
-    dispatch(gestures.update(frame, context, screenWidth, screenHeight));
+    if (frame.discontinuity) {
+      gestures.reset();
+      hasCapturedTouchTarget = false;
+      continue;
+    }
+    const bool startsTouch = frame.down && !gestures.isActive();
+    if (startsTouch) {
+      capturedTouchTarget = TOUCH_UI.resolve(frame.point.x, frame.point.y);
+      hasCapturedTouchTarget = capturedTouchTarget.found;
+    }
+    const auto event = gestures.update(frame, context, screenWidth, screenHeight);
+    if (event.action == crossink::kobo::TouchAction::Cancelled || event.action == crossink::kobo::TouchAction::Left ||
+        event.action == crossink::kobo::TouchAction::Right || event.action == crossink::kobo::TouchAction::Up ||
+        event.action == crossink::kobo::TouchAction::Down || event.action == crossink::kobo::TouchAction::PageBack ||
+        event.action == crossink::kobo::TouchAction::PageForward) {
+      hasCapturedTouchTarget = false;
+    }
+    dispatch(event);
   }
   if (!received && haveTouchFrame && lastTouchFrame.down) {
     lastTouchFrame.timestampMicros = monotonicMicros();
@@ -480,17 +589,71 @@ void updateTouch() {
 }
 
 void syncRefreshProfilePreference() {
-  const auto requested = SETTINGS.koboRefreshProfile == CrossPointSettings::KOBO_REFRESH_FAST
-                             ? crossink::kobo::RefreshProfile::Fast
-                             : crossink::kobo::RefreshProfile::Safe;
-  const bool qualified = crossink::kobo::koboFastRefreshQualified();
-  if (!display.setRefreshProfile(requested, qualified) && requested == crossink::kobo::RefreshProfile::Fast) {
+  // A prior present failure already forced the scheduler to Safe and issued a
+  // GC16 recovery. Clear the persisted preference before this loop can select
+  // a faster profile again or re-enable it after a reboot.
+  if (display.lastTelemetry().fallbackAttempted &&
+      SETTINGS.koboRefreshProfile != CrossPointSettings::KOBO_REFRESH_SAFE) {
     SETTINGS.koboRefreshProfile = CrossPointSettings::KOBO_REFRESH_SAFE;
     (void)SETTINGS.saveToFile();
-    std::fprintf(stderr, "[KOBO][EPD] rejected unqualified Fast profile; restored Safe\n");
+    std::fprintf(stderr, "[KOBO][EPD] display failure forced persisted profile to Safe\n");
+  }
+
+  crossink::kobo::RefreshProfile requested = crossink::kobo::RefreshProfile::Safe;
+  bool qualified = true;
+  switch (SETTINGS.koboRefreshProfile) {
+    case CrossPointSettings::KOBO_REFRESH_FAST:
+      requested = crossink::kobo::RefreshProfile::Fast;
+      qualified = crossink::kobo::koboFastRefreshQualified();
+      break;
+    case CrossPointSettings::KOBO_REFRESH_MAX_BETA:
+      requested = crossink::kobo::RefreshProfile::MaxBeta;
+      qualified = crossink::kobo::koboMaxBetaRefreshQualified();
+      break;
+    case CrossPointSettings::KOBO_REFRESH_SAFE:
+    default:
+      break;
+  }
+  if (!display.setRefreshProfile(requested, qualified) && requested != crossink::kobo::RefreshProfile::Safe) {
+    SETTINGS.koboRefreshProfile = CrossPointSettings::KOBO_REFRESH_SAFE;
+    (void)SETTINGS.saveToFile();
+    std::fprintf(stderr, "[KOBO][EPD] rejected unqualified %s profile; restored Safe\n",
+                 crossink::kobo::refreshProfileName(requested));
   }
 }
 }  // namespace
+
+namespace crossink::kobo {
+
+void prepareTouchForSuspend() {
+  gestures.reset();
+  hasCapturedTouchTarget = false;
+  hasCapturedLongPressTarget = false;
+  mappedInputManager.clearInjectedTouchTargets();
+  haveTouchFrame = false;
+  if (hasProvisionalLongPressButton) {
+    mappedInputManager.cancelInjectedPress(provisionalLongPressButton);
+    hasProvisionalLongPressButton = false;
+  }
+  touch.close();
+}
+
+bool resumeTouchAfterSuspend() {
+  if (touchDevice.path.empty()) return false;
+  const bool reopened = touch.reopen();
+  if (!reopened) {
+    crossink::kobo::TouchDeviceInfo discovered;
+    if (!crossink::kobo::KoboEvdevTouch::discover(discovered) || !touch.open(discovered)) return false;
+    touchDevice = std::move(discovered);
+  }
+  gestures.reset();
+  hasCapturedTouchTarget = false;
+  hasCapturedLongPressTarget = false;
+  haveTouchFrame = false;
+  return true;
+}
+
+}  // namespace crossink::kobo
 
 int main() {
   if (std::getenv("CROSSPOINT_SIM_SD") == nullptr) {
@@ -504,7 +667,6 @@ int main() {
     std::fprintf(stderr, "[KOBO] no frontlight backlight device discovered\n");
   }
 
-  crossink::kobo::TouchDeviceInfo touchDevice;
   if (crossink::kobo::KoboEvdevTouch::discover(touchDevice)) {
     if (!touch.open(touchDevice)) {
       std::fprintf(stderr, "[KOBO] failed to open touch input %s\n", touchDevice.path.c_str());

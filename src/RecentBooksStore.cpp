@@ -170,15 +170,16 @@ RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
   if (FsHelpers::hasEpubExtension(lastBookFileName)) {
     Epub epub(path, "/.crosspoint");
     epub.load(false, true);
-    const std::string collection = epub.getCollection().empty() ? collectionFromLibraryPath(path) : epub.getCollection();
-    return RecentBook{path, epub.getTitle(), epub.getAuthor(), epub.getSeries(), epub.getSeriesIndex(), collection,
-                      epub.getThumbBmpPath()};
+    const std::string collection =
+        epub.getCollection().empty() ? collectionFromLibraryPath(path) : epub.getCollection();
+    return RecentBook{path,       epub.getTitle(),       epub.getAuthor(), epub.getSeries(), epub.getSeriesIndex(),
+                      collection, epub.getThumbBmpPath()};
   } else if (FsHelpers::hasXtcExtension(lastBookFileName)) {
     // Handle XTC file
     Xtc xtc(path, "/.crosspoint");
     if (xtc.load()) {
-      return RecentBook{path, xtc.getTitle(), xtc.getAuthor(), "", "", collectionFromLibraryPath(path),
-                        xtc.getThumbBmpPath()};
+      return RecentBook{
+          path, xtc.getTitle(), xtc.getAuthor(), "", "", collectionFromLibraryPath(path), xtc.getThumbBmpPath()};
     }
   } else if (FsHelpers::hasTxtExtension(lastBookFileName) || FsHelpers::hasMarkdownExtension(lastBookFileName)) {
     return RecentBook{path, lastBookFileName, "", "", "", collectionFromLibraryPath(path), ""};

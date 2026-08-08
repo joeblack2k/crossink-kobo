@@ -531,8 +531,8 @@ void SleepActivity::renderDefaultSleepScreen() const {
   // the ESP splash/logo path here because it makes a normal suspend resemble
   // a reboot on this device.
   renderer.clearScreen();
-  renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - renderer.getLineHeight(UI_12_FONT_ID) / 2, "SLEEPING",
-                            true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - renderer.getLineHeight(UI_12_FONT_ID) / 2, "SLEEPING", true,
+                            EpdFontFamily::BOLD);
   renderer.displayBuffer(HalDisplay::FULL_REFRESH, TURN_OFF_SCREEN_AFTER_SLEEP_REFRESH);
   return;
 #endif

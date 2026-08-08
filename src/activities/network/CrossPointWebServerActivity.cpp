@@ -516,28 +516,28 @@ void CrossPointWebServerActivity::renderServerRunning() const {
       }
     } else {
 #endif
-    startY += metrics.verticalSpacing * 2;
+      startY += metrics.verticalSpacing * 2;
 
-    // STA mode display (original behavior)
-    // std::string ipInfo = "IP Address: " + connectedIP;
-    renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_OPEN_URL_HINT), true, EpdFontFamily::BOLD);
-    startY += height10;
-    renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_SCAN_QR_HINT), true, EpdFontFamily::BOLD);
-    startY += height10 + metrics.verticalSpacing * 2;
+      // STA mode display (original behavior)
+      // std::string ipInfo = "IP Address: " + connectedIP;
+      renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_OPEN_URL_HINT), true, EpdFontFamily::BOLD);
+      startY += height10;
+      renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_SCAN_QR_HINT), true, EpdFontFamily::BOLD);
+      startY += height10 + metrics.verticalSpacing * 2;
 
-    // Show QR code for URL
-    std::string webInfo = "http://" + connectedIP + "/";
-    const Rect qrBounds((pageWidth - QR_CODE_WIDTH) / 2, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
-    QrUtils::drawQrCode(renderer, qrBounds, webInfo);
-    startY += QR_CODE_HEIGHT + metrics.verticalSpacing * 2;
+      // Show QR code for URL
+      std::string webInfo = "http://" + connectedIP + "/";
+      const Rect qrBounds((pageWidth - QR_CODE_WIDTH) / 2, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
+      QrUtils::drawQrCode(renderer, qrBounds, webInfo);
+      startY += QR_CODE_HEIGHT + metrics.verticalSpacing * 2;
 
-    // Show web server URL prominently
-    renderer.drawCenteredText(UI_10_FONT_ID, startY, webInfo.c_str(), true);
-    startY += height10 + 5;
+      // Show web server URL prominently
+      renderer.drawCenteredText(UI_10_FONT_ID, startY, webInfo.c_str(), true);
+      startY += height10 + 5;
 
-    // Also show hostname URL
-    std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + AP_HOSTNAME + ".local/";
-    renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
+      // Also show hostname URL
+      std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + AP_HOSTNAME + ".local/";
+      renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
 #ifdef KOBO_LINUX
     }
 #endif

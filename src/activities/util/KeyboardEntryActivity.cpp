@@ -8,8 +8,8 @@
 #include "MappedInputManager.h"
 #include "components/TouchUiRegistry.h"
 #include "components/UITheme.h"
-#include "platform/DeviceCapabilities.h"
 #include "fontIds.h"
+#include "platform/DeviceCapabilities.h"
 
 const char* const KeyboardEntryActivity::shiftString[2] = {"shift", "SHIFT"};
 

@@ -3,7 +3,9 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <ifaddrs.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -18,6 +20,7 @@ namespace {
 constexpr char kInterface[] = "wlan0";
 constexpr char kStationConfig[] = "/run/crossink-wpa.conf";
 constexpr char kHostapdConfig[] = "/run/crossink-hostapd.conf";
+constexpr char kScanOutput[] = "/run/crossink-iw-scan.txt";
 
 int run(const char* command) { return std::system(command); }
 
@@ -86,14 +89,33 @@ void WiFiClass::mode(const int requestedMode) {
 }
 
 int WiFiClass::scanNetworks(bool, bool, bool, uint32_t, uint8_t) {
+  stopScan();
   networks_.clear();
+  scanFailed_ = false;
   mode(WIFI_STA);
   scanPending_ = true;
+  startScan();
   return WIFI_SCAN_RUNNING;
 }
 
 bool WiFiClass::loadScanResults() {
-  const std::string output = capture("iw dev wlan0 scan 2>/dev/null");
+  // Do not hide stderr here.  The Broadcom driver reports a dead SDIO bus as
+  // "command failed"; presenting that as an empty scan made Settings claim
+  // there were simply no networks and encouraged repeated scans.
+  std::ifstream scanFile(kScanOutput);
+  if (!scanFile.is_open()) {
+    scanFailed_ = true;
+    networks_.clear();
+    return false;
+  }
+  const std::string output((std::istreambuf_iterator<char>(scanFile)), std::istreambuf_iterator<char>());
+  scanFailed_ = output.find("command failed:") != std::string::npos ||
+                output.find("Network is down") != std::string::npos ||
+                output.find("Operation not permitted") != std::string::npos;
+  if (scanFailed_) {
+    networks_.clear();
+    return false;
+  }
   std::istringstream lines(output);
   std::string line;
   networks_.clear();
@@ -133,12 +155,29 @@ bool WiFiClass::loadScanResults() {
 
 int WiFiClass::scanComplete() {
   if (!scanPending_) return static_cast<int>(networks_.size());
+  if (scanPid_ <= 0) {
+    scanFailed_ = true;
+    scanPending_ = false;
+    return WIFI_SCAN_FAILED;
+  }
+  int childStatus = 0;
+  const pid_t result = ::waitpid(scanPid_, &childStatus, WNOHANG);
+  if (result == 0) return WIFI_SCAN_RUNNING;
+  if (result < 0 || result != scanPid_) {
+    scanFailed_ = true;
+    scanPending_ = false;
+    scanPid_ = -1;
+    return WIFI_SCAN_FAILED;
+  }
+  scanPid_ = -1;
   loadScanResults();
   scanPending_ = false;
+  if (scanFailed_) return WIFI_SCAN_FAILED;
   return static_cast<int>(networks_.size());
 }
 
 void WiFiClass::scanDelete() {
+  stopScan();
   networks_.clear();
   scanPending_ = false;
 }
@@ -147,6 +186,8 @@ wl_status_t WiFiClass::begin(const char* ssid, const char* password) {
   if (ssid == nullptr || ssid[0] == '\0') return status_ = WL_NO_SSID_AVAIL;
   mode(WIFI_STA);
   currentSsid_ = ssid;
+  stopScan();
+  stopDhcp();
   dhcpAttempted_ = false;
   run("killall wpa_supplicant >/dev/null 2>&1");
   run("ip addr flush dev wlan0 >/dev/null 2>&1");
@@ -167,23 +208,33 @@ wl_status_t WiFiClass::begin(const char* ssid, const char* password) {
 }
 
 wl_status_t WiFiClass::status() {
-  if (localIP() != IPAddress()) {
-    status_ = WL_CONNECTED;
-    if (mode_ == WIFI_OFF) mode_ = WIFI_STA;
-    return status_;
-  }
   if (mode_ != WIFI_STA && mode_ != WIFI_AP_STA) return status_;
   const std::string output = capture("wpa_cli -i wlan0 status 2>/dev/null");
-  if (output.find("wpa_state=COMPLETED") == std::string::npos) return status_ = WL_IDLE_STATUS;
+  if (output.find("wpa_state=COMPLETED") == std::string::npos) {
+    // A previous DHCP lease can survive a crashed or stopped supplicant.  It
+    // must never make the UI believe that station mode is live: that caused
+    // scans to preserve a dead connection and made joining a network fail.
+    if (localIP() != IPAddress()) run("ip addr flush dev wlan0 >/dev/null 2>&1");
+    stopDhcp();
+    dhcpAttempted_ = false;
+    return status_ = WL_IDLE_STATUS;
+  }
+  if (dhcpPid_ > 0) {
+    int childStatus = 0;
+    const pid_t result = ::waitpid(dhcpPid_, &childStatus, WNOHANG);
+    if (result == dhcpPid_) dhcpPid_ = -1;
+  }
   if (!dhcpAttempted_) {
     dhcpAttempted_ = true;
-    run("udhcpc -i wlan0 -n -q -t 4 -T 2 >/dev/null 2>&1");
+    startDhcp();
   }
   status_ = localIP() == IPAddress() ? WL_IDLE_STATUS : WL_CONNECTED;
   return status_;
 }
 
 void WiFiClass::disconnect(const bool wifiOff, bool) {
+  stopScan();
+  stopDhcp();
   run("killall wpa_supplicant >/dev/null 2>&1");
   run("ip addr flush dev wlan0 >/dev/null 2>&1");
   status_ = WL_DISCONNECTED;
@@ -196,6 +247,79 @@ void WiFiClass::disconnect(const bool wifiOff, bool) {
 }
 
 IPAddress WiFiClass::localIP() const { return interfaceAddress(kInterface); }
+
+void WiFiClass::stopScan() {
+  if (scanPid_ > 0) {
+    (void)::kill(scanPid_, SIGTERM);
+    for (int attempt = 0; attempt < 10; ++attempt) {
+      const pid_t result = ::waitpid(scanPid_, nullptr, WNOHANG);
+      if (result == scanPid_ || result < 0) {
+        scanPid_ = -1;
+        (void)::unlink(kScanOutput);
+        return;
+      }
+      ::usleep(1000);
+    }
+    (void)::kill(scanPid_, SIGKILL);
+    (void)::waitpid(scanPid_, nullptr, 0);
+    scanPid_ = -1;
+  }
+  (void)::unlink(kScanOutput);
+}
+
+void WiFiClass::startScan() {
+  const pid_t child = ::fork();
+  if (child < 0) {
+    scanFailed_ = true;
+    scanPending_ = false;
+    return;
+  }
+  if (child == 0) {
+    const int descriptor = ::open(kScanOutput, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (descriptor >= 0) {
+      (void)::dup2(descriptor, STDOUT_FILENO);
+      (void)::dup2(descriptor, STDERR_FILENO);
+      ::close(descriptor);
+    }
+    ::execlp("iw", "iw", "dev", kInterface, "scan", static_cast<char*>(nullptr));
+    _exit(127);
+  }
+  scanPid_ = child;
+}
+
+void WiFiClass::stopDhcp() {
+  if (dhcpPid_ <= 0) return;
+  (void)::kill(dhcpPid_, SIGTERM);
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    const pid_t result = ::waitpid(dhcpPid_, nullptr, WNOHANG);
+    if (result == dhcpPid_ || result < 0) {
+      dhcpPid_ = -1;
+      return;
+    }
+    ::usleep(1000);
+  }
+  (void)::kill(dhcpPid_, SIGKILL);
+  (void)::waitpid(dhcpPid_, nullptr, 0);
+  dhcpPid_ = -1;
+}
+
+void WiFiClass::startDhcp() {
+  if (dhcpPid_ > 0) return;
+  const pid_t child = ::fork();
+  if (child < 0) return;
+  if (child == 0) {
+    const int descriptor = ::open("/dev/null", O_WRONLY | O_CLOEXEC);
+    if (descriptor >= 0) {
+      (void)::dup2(descriptor, STDOUT_FILENO);
+      (void)::dup2(descriptor, STDERR_FILENO);
+      ::close(descriptor);
+    }
+    ::execlp("udhcpc", "udhcpc", "-i", kInterface, "-n", "-q", "-t", "4", "-T", "2", static_cast<char*>(nullptr));
+    _exit(127);
+  }
+  dhcpPid_ = child;
+}
+
 wifi_mode_t WiFiClass::getMode() const {
   if (mode_ == WIFI_OFF && localIP() != IPAddress()) return WIFI_STA;
   return mode_;

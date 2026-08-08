@@ -27,16 +27,25 @@ class OpdsCoverCache {
   // A missing cover URL remains a local Failed state and never enters the
   // network queue.
   void request(const std::string& serverId, const OpdsEntry& entry);
+  // Explicitly discard a failed source/cache artefact and put the card back in
+  // the single-worker queue. This is intentionally separate from request():
+  // ordinary renders retain exponential backoff instead of hammering a server.
+  bool retry(const std::string& serverId, const std::string& entryId);
+  // Settings uses this for an intentional user retry. Returns the number of
+  // failed cards placed back in the low-priority queue.
+  size_t retryFailedForServer(const std::string& serverId);
   void tick();
   bool takeChange(Change& change);
   State stateFor(const std::string& serverId, const std::string& entryId) const;
 
  private:
+  struct Pending;
+
   OpdsCoverCache() = default;
   void queueFetch(size_t index);
   void queueConvert(size_t index);
+  void publishChange(const Pending& item, const std::string& detail = {});
 
-  struct Pending;
   std::vector<Pending> pending;
   std::vector<Change> changes;
 };

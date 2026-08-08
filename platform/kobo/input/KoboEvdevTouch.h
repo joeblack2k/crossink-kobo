@@ -21,6 +21,16 @@ struct TouchFrame {
   bool positionChanged = false;
   std::uint64_t timestampMicros = 0;
   TouchPoint rawPoint;
+  bool discontinuity = false;
+};
+
+enum class TouchReadResult : std::uint8_t {
+  FrameReady,
+  WouldBlock,
+  Interrupted,
+  Resynchronized,
+  DeviceLost,
+  ProtocolError,
 };
 
 class KoboEvdevTouch {
@@ -33,10 +43,14 @@ class KoboEvdevTouch {
 
   [[nodiscard]] static bool discover(TouchDeviceInfo& result, const std::string& inputDirectory = "/dev/input");
   [[nodiscard]] bool open(const TouchDeviceInfo& device, TouchCalibration calibration = {});
+  [[nodiscard]] bool reopen();
   void close();
   void setOrientation(ScreenOrientation orientation);
 
-  // Returns one complete evdev SYN_REPORT frame. EAGAIN is reported as false.
+  // The detailed result distinguishes an idle queue from device loss.
+  [[nodiscard]] TouchReadResult readFrameDetailed(TouchFrame& frame);
+
+  // Compatibility wrapper: returns true for a frame or discontinuity frame.
   [[nodiscard]] bool readFrame(TouchFrame& frame);
   [[nodiscard]] bool isOpen() const { return fd_ >= 0; }
   [[nodiscard]] const TouchDeviceInfo& device() const { return device_; }
@@ -49,6 +63,8 @@ class KoboEvdevTouch {
   std::int32_t rawY_ = 0;
   bool down_ = false;
   bool positionChanged_ = false;
+  bool discarding_ = false;
+  std::uint64_t lastTimestampMicros_ = 0;
 };
 
 }  // namespace crossink::kobo
