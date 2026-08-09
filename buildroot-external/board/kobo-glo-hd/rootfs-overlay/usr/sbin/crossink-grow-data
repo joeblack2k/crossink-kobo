@@ -31,13 +31,13 @@ awk -v part="$PART" '$1 == part { found=1 } END { exit found ? 0 : 1 }' /proc/mo
 
 dump=$(sfdisk -d "$DISK" 2>/dev/null) || { fail "cannot read partition table"; exit 1; }
 printf '%s\n' "$dump" | grep -q 'label-id: 0x4370b001' || { fail "MBR guard failed"; exit 1; }
-table=$(printf '%s\n' "$dump" | sed -n 's#^/dev/mmcblk0p\([1-4]\) *: start=\([0-9][0-9]*\), size=\([0-9][0-9]*\), type=\([0-9A-Fa-f][0-9A-Fa-f]*\).*#\1 \2 \3 \4#p')
+table=$(printf '%s\n' "$dump" | sed -n 's#^/dev/mmcblk0p\([1-4]\) *: start= *\([0-9][0-9]*\), size= *\([0-9][0-9]*\), type= *\([0-9A-Fa-f][0-9A-Fa-f]*\).*#\1 \2 \3 \4#p')
 set -- $table
 [ "$#" -eq 16 ] || { fail "expected exactly four partitions"; exit 1; }
 [ "$2" = 30720 ] && [ "$3" = 49152 ] && [ "$4" = 83 ] &&
 	[ "$6" = 104448 ] && [ "$7" = 262144 ] && [ "$8" = 83 ] &&
-	[ "$10" = 366592 ] && [ "$11" = 1048576 ] && [ "$12" = 83 ] &&
-	[ "$14" = 1415168 ] && [ "$16" = 83 ] || {
+	[ "${10}" = 366592 ] && [ "${11}" = 1048576 ] && [ "${12}" = 83 ] &&
+	[ "${14}" = 1415168 ] && [ "${16}" = 83 ] || {
 		fail "geometry guard failed"; exit 1
 }
 total_sectors=$(blockdev --getsz "$DISK" 2>/dev/null) || { fail "cannot read card size"; exit 1; }

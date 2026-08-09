@@ -18,7 +18,7 @@ done
 [ -f "$image" ] || usage
 case "$size_bytes" in ''|*[!0-9]*) usage ;; esac
 [ "$(id -u)" -eq 0 ] || { echo "Run this test as root in Linux" >&2; exit 1; }
-for tool in awk blockdev cmp cp dd dumpe2fs losetup mount mountpoint resize2fs sed sfdisk stat truncate umount; do
+for tool in awk blockdev cmp cp dd dumpe2fs losetup mknod mount mountpoint partx resize2fs sed sfdisk stat truncate umount; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "Missing tool: $tool" >&2; exit 1; }
 done
 
@@ -26,6 +26,15 @@ repo_dir=$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd)
 grow_script="$repo_dir/buildroot-external/board/kobo-glo-hd/rootfs-overlay/usr/sbin/crossink-grow-data"
 work=$(mktemp -d "${TMPDIR:-/tmp}/crossink-grow-image.XXXXXX")
 loop=
+create_partition_nodes() {
+	loop_name=$(basename "$loop")
+	[ -r "/sys/class/block/$loop_name/${loop_name}p4/dev" ] || partx -a "$loop"
+	for partition in 1 2 3 4; do
+		device_numbers=$(cat "/sys/class/block/$loop_name/${loop_name}p$partition/dev")
+		rm -f "${loop}p$partition"
+		mknod "${loop}p$partition" b "${device_numbers%:*}" "${device_numbers#*:}"
+	done
+}
 cleanup() {
 	mountpoint -q /mnt/crossink-user && umount /mnt/crossink-user || true
 	mountpoint -q /boot && umount /boot || true
@@ -44,6 +53,9 @@ truncate -s "$size_bytes" "$copy"
 dd if="$copy" of="$work/original.mbr" bs=512 count=1 status=none
 
 loop=$(losetup --find --show --partscan "$copy")
+if [ ! -b "${loop}p4" ]; then
+	create_partition_nodes
+fi
 for _ in 1 2 3 4 5; do
 	[ -b "${loop}p4" ] && break
 	sleep 1
@@ -84,6 +96,7 @@ cmp -s "$work/original.mbr" /boot/crossink-mbr.before-grow.bin || {
 
 umount /boot
 blockdev --rereadpt "$loop"
+create_partition_nodes
 mount "${loop}p1" /boot
 "$test_script"
 [ -e /boot/flags/CROSSINK_DATA_GROWN ] || { echo "Growth marker is missing" >&2; exit 1; }

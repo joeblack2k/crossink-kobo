@@ -24,7 +24,7 @@ done
 [ -f "$image" ] || { echo "Missing image: $image" >&2; exit 1; }
 [ -f "$dtb" ] || { echo "Missing N437 DTB: $dtb" >&2; exit 1; }
 case "$size_bytes" in ''|*[!0-9]*) usage ;; esac
-for tool in cmp sfdisk e2label debugfs dumpimage dd stat mktemp sha256sum file grep find tail wc; do
+for tool in cmp sfdisk e2label debugfs dd stat mktemp sha256sum file grep find tail wc python3; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "Missing tool: $tool" >&2; exit 1; }
 done
 
@@ -58,17 +58,26 @@ trap cleanup EXIT HUP INT TERM
 
 # The loader slot is a legacy ARM uImage at the measured 40 MiB offset.
 dd if="$image" of="$work/uImage" bs=512 skip=81920 count=22528 status=none
-header=$(dumpimage -l "$work/uImage")
-# U-Boot releases use either a dedicated `Architecture:` line or include the
-# architecture in `Image Type:`. Accept both representations while still
-# requiring ARM explicitly.
-printf '%s\n' "$header" | grep -Eq 'Architecture:[[:space:]]+ARM|Image Type:[[:space:]]+ARM ' || {
-	echo 'uImage is not ARM' >&2
-	exit 1
-}
-printf '%s\n' "$header" | grep -q 'Load Address: 10008000' || { echo 'uImage load address is wrong' >&2; exit 1; }
-printf '%s\n' "$header" | grep -q 'Entry Point:  10008000' || { echo 'uImage entry address is wrong' >&2; exit 1; }
-dumpimage -T kernel -p 0 -o "$work/kernel-payload" "$work/uImage" >/dev/null
+python3 - "$work/uImage" "$work/kernel-payload" <<'PY'
+import struct
+import sys
+import zlib
+
+source, destination = sys.argv[1:]
+image = open(source, "rb").read()
+header = image[:64]
+magic, header_crc, timestamp, size, load, entry, data_crc, os_id, arch, kind, compression, name = (
+    struct.unpack(">7I4B32s", header)
+)
+assert magic == 0x27051956, "legacy uImage magic mismatch"
+assert (os_id, arch, kind, compression) == (5, 2, 2, 0), "uImage is not uncompressed Linux/ARM kernel"
+assert (load, entry) == (0x10008000, 0x10008000), "uImage load or entry address mismatch"
+assert zlib.crc32(header[:4] + b"\0\0\0\0" + header[8:]) & 0xFFFFFFFF == header_crc, "uImage header CRC mismatch"
+payload = image[64:64 + size]
+assert len(payload) == size, "truncated uImage payload"
+assert zlib.crc32(payload) & 0xFFFFFFFF == data_crc, "uImage payload CRC mismatch"
+open(destination, "wb").write(payload)
+PY
 dtb_size=$(wc -c < "$dtb")
 [ "$(wc -c < "$work/kernel-payload")" -gt "$dtb_size" ] || {
 	echo 'uImage payload is too small to contain the N437 DTB' >&2
