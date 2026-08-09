@@ -512,7 +512,7 @@ index 6b8bf4c..13858a2 100644
  void handleClientRequest(CrossPointWebServer *owner, NativeServerState &state,
                           int client) {
    Request req;
-@@ -774,17 +1144,76 @@ void handleClientRequest(CrossPointWebServer *owner, NativeServerState &state,
+@@ -774,17 +1144,79 @@ void handleClientRequest(CrossPointWebServer *owner, NativeServerState &state,
                   propfindXml(path, depth), "DAV: 1\r\n");
      return;
    }
@@ -564,6 +564,9 @@ index 6b8bf4c..13858a2 100644
 +      const std::string effectivePassword = password.empty() ? old.password : password;
 +      saved = (old.ssid == ssid || WIFI_STORE.removeCredential(old.ssid)) && WIFI_STORE.addCredential(ssid, effectivePassword);
 +    } else saved = WIFI_STORE.addCredential(ssid, password);
++    // A network saved through the portal is a normal user-configured network,
++    // not merely an address-book entry.  Make it the boot-time candidate too.
++    if (saved) WIFI_STORE.setLastConnectedSsid(ssid);
 +    sendResponse(client, saved ? 200 : 500, "application/json", saved ? "{\"message\":\"Wi-Fi network saved\"}" : "{\"error\":\"Could not save Wi-Fi network\"}");
 +    return;
 +  }
@@ -594,7 +597,7 @@ index 6b8bf4c..13858a2 100644
    if (req.method == "GET" && req.path == "/api/files") {
      const std::string path = normalizePath(queryValue(req, "path", "/"));
      if (path.empty() || isProtectedPath(path)) {
-@@ -827,6 +1256,15 @@ void handleClientRequest(CrossPointWebServer *owner, NativeServerState &state,
+@@ -827,6 +1259,15 @@ void handleClientRequest(CrossPointWebServer *owner, NativeServerState &state,
        return;
      }
      std::string dir = normalizePath(queryValue(req, "path", "/"));
@@ -610,7 +613,7 @@ index 6b8bf4c..13858a2 100644
      if (dir.empty() || isProtectedPath(dir)) {
        sendResponse(client, 403, "text/plain", "Forbidden");
        return;
-@@ -999,7 +1437,13 @@ void acceptLoop(CrossPointWebServer *owner, NativeServerState *state) {
+@@ -999,7 +1440,13 @@ void acceptLoop(CrossPointWebServer *owner, NativeServerState *state) {
  }
  } // namespace
 
@@ -625,7 +628,7 @@ index 6b8bf4c..13858a2 100644
 
  CrossPointWebServer::~CrossPointWebServer() { stop(); }
 
-@@ -1019,11 +1463,15 @@ void CrossPointWebServer::begin() {
+@@ -1019,11 +1466,15 @@ void CrossPointWebServer::begin() {
 
    sockaddr_in addr{};
    addr.sin_family = AF_INET;
@@ -642,7 +645,7 @@ index 6b8bf4c..13858a2 100644
      close(state->fd);
      return;
    }
-@@ -1041,8 +1489,7 @@ void CrossPointWebServer::begin() {
+@@ -1041,8 +1492,7 @@ void CrossPointWebServer::begin() {
    }
    running = true;
    statePtr->worker = std::thread(acceptLoop, this, statePtr);

@@ -5,9 +5,9 @@ nav_order: 15
 
 # Kobo build
 
-This port targets the Kobo Glo HD N437. The repository is source-only: it does
-not contain a stock Kobo image, a private recovery image, credentials, or a
-prebuilt firmware release.
+This port targets the Kobo Glo HD N437. Public beta binaries are published on
+GitHub Releases, but the source tree does not contain a stock Kobo image,
+private recovery data, credentials, or generated release images.
 
 ## Prerequisites
 
@@ -43,6 +43,6 @@ behavior is correct on hardware.
 ## Reproducibility
 
 Record the source commit, submodule commits, Buildroot output manifest, and
-hardware test evidence for every candidate. Do not call a candidate Beta 4 or
-publish a binary until the acceptance gates in `docs/K4_00_READ_ME_FIRST.md`
-and `docs/K4_12_EXECUTION_LOG.md` are complete.
+hardware test evidence for every candidate. Do not call a candidate Beta 4
+until the acceptance gates in `docs/K4_00_READ_ME_FIRST.md` and
+`docs/K4_12_EXECUTION_LOG.md` are complete.

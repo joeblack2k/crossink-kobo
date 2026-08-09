@@ -1,0 +1,84 @@
+#!/bin/sh
+# Grow only N437 p4 before /data is mounted. All failures are recoverable.
+set -u
+
+PATH=/usr/sbin:/sbin:/usr/bin:/bin
+export PATH
+DISK=/dev/mmcblk0
+PART=${DISK}p4
+BOOT=/boot
+STATE=$BOOT/flags
+BACKUP=$BOOT/crossink-mbr.before-grow.bin
+PARTITIONED=$STATE/CROSSINK_DATA_PARTITIONED
+COMPLETE=$STATE/CROSSINK_DATA_GROWN
+
+fail() { echo "crossink-grow-data: $*" >&2; return 1; }
+persist_marker() {
+	marker=$1
+	: > "$marker" || { fail "cannot write marker $marker"; return 1; }
+	sync || { fail "cannot persist marker $marker"; return 1; }
+}
+[ -e "$COMPLETE" ] && exit 0
+[ "$(cat /proc/device-tree/model 2>/dev/null || true)" = "Kobo Glo HD N437 (CrossInk)" ] ||
+	fail "unexpected model" || exit 1
+[ -b "$DISK" ] && [ -b "$PART" ] || { fail "mmc not ready"; exit 1; }
+mountpoint -q "$BOOT" || { fail "$BOOT is not mounted"; exit 1; }
+awk -v part="${DISK}p1" -v path="$BOOT" \
+	'$1 == part && $2 == path { found=1 } END { exit found ? 0 : 1 }' /proc/mounts ||
+	{ fail "$BOOT is not mounted from ${DISK}p1"; exit 1; }
+awk -v part="$PART" '$1 == part { found=1 } END { exit found ? 0 : 1 }' /proc/mounts &&
+	{ fail "$PART is already mounted"; exit 1; }
+
+dump=$(sfdisk -d "$DISK" 2>/dev/null) || { fail "cannot read partition table"; exit 1; }
+printf '%s\n' "$dump" | grep -q 'label-id: 0x4370b001' || { fail "MBR guard failed"; exit 1; }
+table=$(printf '%s\n' "$dump" | sed -n 's#^/dev/mmcblk0p\([1-4]\) *: start=\([0-9][0-9]*\), size=\([0-9][0-9]*\), type=\([0-9A-Fa-f][0-9A-Fa-f]*\).*#\1 \2 \3 \4#p')
+set -- $table
+[ "$#" -eq 16 ] || { fail "expected exactly four partitions"; exit 1; }
+[ "$2" = 30720 ] && [ "$3" = 49152 ] && [ "$4" = 83 ] &&
+	[ "$6" = 104448 ] && [ "$7" = 262144 ] && [ "$8" = 83 ] &&
+	[ "$10" = 366592 ] && [ "$11" = 1048576 ] && [ "$12" = 83 ] &&
+	[ "$14" = 1415168 ] && [ "$16" = 83 ] || {
+		fail "geometry guard failed"; exit 1
+}
+total_sectors=$(blockdev --getsz "$DISK" 2>/dev/null) || { fail "cannot read card size"; exit 1; }
+[ "$total_sectors" -gt 1415168 ] || { fail "card is too small"; exit 1; }
+desired_size=$((total_sectors - 1415168))
+current_size=${15}
+[ "$current_size" -gt 0 ] && [ "$current_size" -le "$desired_size" ] ||
+	{ fail "refusing to shrink or repair invalid p4"; exit 1; }
+
+if [ "$current_size" != "$desired_size" ]; then
+	[ ! -e "$PARTITIONED" ] || { fail "partition marker and table disagree"; exit 1; }
+	if [ ! -e "$BACKUP" ]; then
+		dd if="$DISK" of="$BACKUP" bs=512 count=1 conv=fsync 2>/dev/null || {
+			fail "MBR backup failed"; exit 1
+		}
+	fi
+	[ "$(wc -c < "$BACKUP")" -eq 512 ] || { fail "MBR backup is invalid"; exit 1; }
+	printf '%s\n' "1415168,$desired_size,83" |
+		sfdisk --no-reread --no-tell-kernel -N 4 "$DISK" >/dev/null || {
+			fail "partition resize failed"; exit 1
+		}
+	persist_marker "$PARTITIONED" || exit 1
+	reboot -f || true
+	exit 1
+fi
+
+[ -e "$PARTITIONED" ] || persist_marker "$PARTITIONED" || exit 1
+e2fsck -p "$PART"
+fsck_status=$?
+case "$fsck_status" in
+	0|1) ;;
+	2)
+		sync || { fail "cannot persist filesystem repairs"; exit 1; }
+		reboot -f || true
+		exit 1
+		;;
+	*)
+		fail "filesystem check deferred (status $fsck_status)"
+		exit 1
+		;;
+esac
+resize2fs "$PART" || { fail "filesystem resize deferred"; exit 1; }
+persist_marker "$COMPLETE" || exit 1
+exit 0

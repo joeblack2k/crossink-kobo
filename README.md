@@ -1,7 +1,8 @@
-> **CrossInk-Kobo is an experimental source-only port for the Kobo Glo HD N437.**
+> **CrossInk-Kobo is an experimental port for the Kobo Glo HD N437.**
 >
-> This repository does not publish prebuilt firmware images. A device-specific image
-> must be built locally from the documented source and verified on the target device.
+> The first public beta is distributed as a flashable microSD image. It supports
+> only the N437 and should be tested on a separate card while the original card
+> remains unchanged.
 
 ## What's different in this fork
 
@@ -22,8 +23,9 @@ My goal with this fork was to maintain the core Crosspoint firmware while integr
 
 ---
 
-**Hardware status**: Kobo Glo HD N437 is the current target. Beta 4 is not a release
-claim yet; power management, input, network and hardware soak gates remain in progress.
+**Hardware status**: Kobo Glo HD N437 is the current target. The downloadable
+Beta 3 is still experimental; Beta 4 is not a release claim yet while longer
+power-management, input, network and hardware-soak gates remain in progress.
 
 ### Highlights
 
@@ -112,10 +114,11 @@ See [Simulator](./docs/simulator.md) for setup, platform notes, keyboard control
 
 ## Installation
 
-There is currently no supported public binary download or web installer for the Kobo port.
-Build instructions and hardware prerequisites are documented in [Kobo build](./docs/kobo-build.md).
-
-See [Installation](./docs/installation.md) for step-by-step flashing and revert instructions.
+Download the current prerelease image from
+[GitHub Releases](https://github.com/joeblack2k/crossink-kobo/releases) and follow
+the [installation and recovery instructions](./docs/installation.md). Local
+build instructions and hardware prerequisites are documented in
+[Kobo build](./docs/kobo-build.md).
 
 ---
 

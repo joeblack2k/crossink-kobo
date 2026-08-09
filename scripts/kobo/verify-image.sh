@@ -45,6 +45,10 @@ actual_table=$(sfdisk -d "$image" | sed -n 's/.*start= *\([0-9][0-9]*\), size= *
 	printf '%s\n' "$actual_table" >&2
 	exit 1
 }
+printf '%s\n' "$(sfdisk -d "$image")" | grep -q 'label-id: 0x4370b001' || {
+	echo 'MBR label-id mismatch' >&2
+	exit 1
+}
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/crossink-n437-verify.XXXXXX")
 cleanup() {
@@ -99,6 +103,10 @@ debugfs -R 'stat /flags/CROSSINK_RECOVERY_AVAILABLE' "$work/p1.ext4" 2>/dev/null
 	echo 'CrossInk recovery flag absent from p1' >&2
 	exit 1
 }
+if debugfs -R 'stat /flags/CROSSINK_DEV_ENABLE' "$work/p1.ext4" 2>/dev/null | grep -q 'Inode:'; then
+	echo 'Public image contains CROSSINK_DEV_ENABLE' >&2
+	exit 1
+fi
 
 root_dump="$work/root"
 mkdir -p "$root_dump"

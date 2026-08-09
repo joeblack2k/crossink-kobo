@@ -2,6 +2,7 @@
 # CrossInk process watchdog. Three early exits persistently select the own
 # recovery mode; a process that survives the health window clears the counter.
 set -u
+trap '' PIPE
 
 STATE_DIR=/data/.crossink/watchdog
 LOG_DIR=/data/.crossink/log
@@ -41,7 +42,10 @@ write_attempts() {
 
 find_application() {
 	for candidate in /opt/crossink/current/bin/crossink-kobo /usr/bin/crossink-kobo; do
-		if [ -x "$candidate" ]; then printf '%s' "$candidate"; return 0; fi
+		if [ -x "$candidate" ]; then
+			readlink -f "$candidate"
+			return 0
+		fi
 	done
 	return 1
 }

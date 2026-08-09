@@ -82,7 +82,7 @@ std::size_t appendHex(char* const destination, std::size_t length, const std::ui
 }
 
 void fatalSignal(const int signal, siginfo_t* const info, void* const context) {
-  constexpr char prefix[] = "CrossInk Kobo Beta 1 fatal signal ";
+  constexpr char prefix[] = "CrossInk Kobo Beta 3 fatal signal ";
   char record[128]{};
   std::size_t length = sizeof(prefix) - 1;
   std::memcpy(record, prefix, length);

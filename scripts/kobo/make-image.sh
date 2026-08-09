@@ -23,11 +23,12 @@ fi
 usage() {
 	printf '%s\n' \
 		'Usage: make-image.sh --reference reference.img --zimage zImage --dtb n437.dtb --rootfs rootfs.tar --recovery recovery.tar --output crossink.img --size-bytes <exact-card-size>' \
+		'Add --dev-enable only for an explicitly requested development image.' \
 		'Requires Linux, sfdisk, mkfs.ext4 and mkimage; no loop devices are used.' >&2
 	exit 2
 }
 
-reference='' zimage='' dtb='' rootfs='' recovery='' output='' size_bytes=''
+reference='' zimage='' dtb='' rootfs='' recovery='' output='' size_bytes='' dev_enable=0
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 		--reference) reference=${2:?}; shift 2 ;;
@@ -37,6 +38,7 @@ while [ "$#" -gt 0 ]; do
 		--recovery) recovery=${2:?}; shift 2 ;;
 		--output) output=${2:?}; shift 2 ;;
 		--size-bytes) size_bytes=${2:?}; shift 2 ;;
+		--dev-enable) dev_enable=1; shift ;;
 		-h|--help) usage ;;
 		*) echo "Unknown option: $1" >&2; usage ;;
 	esac
@@ -124,9 +126,9 @@ tail -c "$(wc -c < "$dtb")" "$kernel_payload" | cmp -s - "$dtb" || {
 }
 
 # p1 and p2 are wholly CrossInk-owned: no InkBox filesystem is retained.
-: > "$boot_stage/flags/CROSSINK_DEV_ENABLE"
+[ "$dev_enable" -eq 0 ] || : > "$boot_stage/flags/CROSSINK_DEV_ENABLE"
 : > "$boot_stage/flags/CROSSINK_RECOVERY_AVAILABLE"
-printf 'CrossInk Kobo Beta 1\n' > "$boot_stage/README"
+printf 'CrossInk Kobo Beta 3\n' > "$boot_stage/README"
 mkdir -p "$recovery_stage/etc"
 printf 'minimal recovery\n' > "$recovery_stage/etc/crossink-mode"
 if find "$root_stage" "$recovery_stage" -type f \( -name 'id_*' -o -name 'pass.txt' \) -print -quit | grep -q .; then

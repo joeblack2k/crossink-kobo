@@ -10,7 +10,10 @@ RUN apt-get update \
         build-essential \
         ca-certificates \
         cpio \
+        e2fsprogs \
+        fakeroot \
         file \
+        fdisk \
         flex \
         git \
         libncurses-dev \
@@ -19,6 +22,7 @@ RUN apt-get update \
         perl \
         python3 \
         rsync \
+        u-boot-tools \
         unzip \
         wget \
         xz-utils \

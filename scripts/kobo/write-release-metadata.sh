@@ -34,7 +34,7 @@ git -C "$repo_dir" diff --cached --quiet --ignore-submodules -- || dirty=yes
 [ -z "$(git -C "$repo_dir" ls-files --others --exclude-standard)" ] || dirty=yes
 
 {
-	echo 'release=CrossInk-Kobo Beta 1'
+	echo 'release=CrossInk-Kobo Beta 3'
 	printf 'created_utc='; date -u +%Y-%m-%dT%H:%M:%SZ
 	echo "git_head=$(git -C "$repo_dir" rev-parse HEAD)"
 	echo "git_branch=$(git -C "$repo_dir" branch --show-current)"

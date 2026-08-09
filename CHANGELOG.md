@@ -1,4 +1,4 @@
-## [1.4.0-kobo-beta3] - Unreleased
+## [1.4.0-kobo-beta3] - 2026-08-09
 
 ### Added
 
@@ -7,6 +7,7 @@
 - Added Kobo image construction, verification, hardware probing, deployment, rollback and release-evidence tooling while preserving the original CrossInk simulator and Xteink targets.
 - Added a five-point N437 touch-calibration utility that records raw and mapped coordinates for hardware verification.
 - Added a real Linux Wi-Fi adapter for station scanning/connection and hotspot mode, with credentials kept in root-only runtime files.
+- Added a public card image whose fourth ext4 partition safely expands to the remaining SD-card capacity on first boot.
 
 ### Changed
 
@@ -27,6 +28,9 @@
 - A missing N437 thermal telemetry source now forces any selected Fast or Max
   display profile back to Safe with a full GC16 recovery instead of treating an
   unknown temperature as safe.
+- The Kobo supervisor now resolves the active application before launch and
+  ignores broken pipes inherited by the reader, preventing deployment races and
+  disconnected HTTP clients from terminating CrossInk.
 
 ## [v1.4.0] - 2026-07-10
 

@@ -6,6 +6,7 @@ DATA=/data
 DEVICE=/dev/mmcblk0p4
 BOOT=/boot
 BOOT_DEVICE=/dev/mmcblk0p1
+GROW_HELPER=${CROSSINK_GROW_HELPER:-/usr/sbin/crossink-grow-data}
 
 case "${1:-}" in
 	start)
@@ -13,6 +14,10 @@ case "${1:-}" in
 		if ! mountpoint -q "$BOOT"; then
 			mount -t ext4 -o rw,noatime "$BOOT_DEVICE" "$BOOT" 2>/dev/null || \
 				echo "crossink: boot flag partition unavailable ($BOOT_DEVICE)" >&2
+		fi
+		if ! "$GROW_HELPER"; then
+			echo "crossink: data growth deferred; leaving /data unmounted" >&2
+			exit 0
 		fi
 		mkdir -p "$DATA"
 		if ! mountpoint -q "$DATA"; then

@@ -129,7 +129,7 @@ target_compile_definitions(crossink-kobo PRIVATE
 	# ESP-NOW substitutes) merely because it reuses compatibility headers.
 	CROSSPOINT_POSIX
 	KOBO_LINUX
-	CROSSINK_VERSION="1.4.0-kobo-beta1"
+	CROSSINK_VERSION="1.4.0-kobo-beta3"
 	CROSSPOINT_FIRMWARE_VARIANT="kobo-n437"
 	CROSSPOINT_NATIVE_BIND_ANY=1
 	CROSSPOINT_NATIVE_WEB_PORT=80
