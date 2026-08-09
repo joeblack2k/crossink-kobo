@@ -1,168 +1,181 @@
-> **CrossInk-Kobo is an experimental port for the Kobo Glo HD N437.**
->
-> The first public beta is distributed as a flashable microSD image. It supports
-> only the N437 and should be tested on a separate card while the original card
-> remains unchanged.
+# CrossInk for Kobo Glo HD
 
-## What's different in this fork
+CrossInk-Kobo is a lightweight, open-source reading system for the **Kobo Glo
+HD N437**. It replaces the complete software on a separate internal microSD
+card: a small Linux system boots first, then starts the CrossInk reader.
 
-My goal with this fork was to maintain the core Crosspoint firmware while integrating my preferred typography and some lightweight reading statistics. I’ve focused on keeping the underlying system stable while layering in a few "nice-to-have" features and UI refinements along the way.
+> [!IMPORTANT]
+> The downloadable image is only for the **Kobo Glo HD, model N437**.
+> Do not flash it to a Kobo Aura, Clara, Libra, Mini or another Kobo model.
 
-<table>
-  <tr>
-    <td align="center">
-      <img src="./docs/images/bitter-small-15-margin.jpg" alt="Font: Bitter, Size: 12 pt, Margin: 15" /><br/>
-      <em>Font: Bitter, Size: 12 pt, Margin: 15</em>
-    </td>
-    <td align="center">
-      <img src="./docs/images/reading-stats.jpg" alt="Reading Stats with custom front button mapping shown" /><br/>
-      <em>Reading Stats with custom front button mapping shown</em>
-    </td>
-  </tr>
-</table>
+## Start here
 
----
+| | |
+|---|---|
+| Current release | **CrossInk Kobo Glo HD Beta 3** |
+| Download | [Release page](https://github.com/joeblack2k/crossink-kobo/releases/tag/v1.4.0-kobo-beta3) |
+| Supported device | Kobo Glo HD N437 |
+| Minimum card size | 2 GB |
+| Main book format | EPUB |
+| Status | Public beta |
 
-**Hardware status**: Kobo Glo HD N437 is the current target. The downloadable
-Beta 3 is still experimental; Beta 4 is not a release claim yet while longer
-power-management, input, network and hardware-soak gates remain in progress.
+The release page contains:
 
-### Highlights
+- `CrossInk-Kobo-Glo-HD-N437-1.4.0-beta3.img.xz`, the flashable image;
+- `SHA256SUMS`, for checking the download;
+- a build manifest with the exact source, kernel and image hashes.
 
-- New reader fonts: Lexend Deca and Bitter.
-- Unicode emoji and miscellaneous symbols support (a limited subset).
-- Adjusted font sizes: 8 pt, 9 pt, 10 pt, 12 pt, 14 pt, 16 pt, 18 pt, and 20 pt. See [Font Build Variants](./docs/font-build-variants.md) for more details.
-- Added ~~strikethrough~~ support.
-- Made <u>underlines</u> thicker for better visibility.
-- Added a custom `Minimal` theme and sleep screen option for the minimalists out there.
-- Added a custom `Dashboard` theme and sleep screen option for reading stats enthusiasts.
-- Added support for `<hr>` section breaks.
-- Added support for "redaction" style rendering.
-- Added improved support for tables with simple markup.
-- Added ability to add bookmarks.
-- Added ability to remap front buttons that only applies in the reader.
-- Added Bionic Reading and Guide Dots as optional reader modes.
-- Added Force Paragraph Indents for books that render as one giant wall of text.
-- Added ability to pin a sleep image as a favorite. The favorited image will always be displayed when your sleep settings are set to `Custom` or `Cover + Custom` (when no cover is available).
-- Added more in-reader control remapping options for side buttons, short power button clicks, and long-press menu actions.
-- Added ability to mark a book as finished from the in-book menu. A pop-up will also display once 99% of the book is reached. This status allows tracking of total books read.
-- Added ability to move finished books to "Read" folder.
-- In-book menu to quickly adjust reader options without having to exit the book.
-- Reading stats: total books read, total reading time, number of sessions, pages turned, average session time, pages turned per minute. You can also set your reading stats as your sleep screen.
-- All-time reading stats [syncing](./docs/reading-stats-sync.md) between two CrossInk devices.
-- Reading [progress sync](./docs/nearby-position-sync.md) between two CrossInk devices.
-- Added customizable Auto Page Turn Interval (anything between 5-120 seconds).
-- Added ability to view Recent Books as a 3x3 grid view.
-- Release notes describe source changes only until a reproducible, device-tested release is approved.
+## What is CrossInk-Kobo?
 
----
+CrossInk-Kobo gives an older Kobo a focused, local-first reading environment
+without requiring an account or cloud service. The reader is built around
+comfortable EPUB reading, clear typography and predictable e-ink behavior.
 
-### Reader Fonts
+This repository is a fork of [CrossInk](https://github.com/uxjulia/CrossInk),
+but this branch is specifically a **Kobo Linux port**. Some shared reader code
+comes from the original ESP32 project; the downloadable Kobo image does not run
+on an ESP32 and is not installed over the normal Kobo desktop updater.
 
-The default fonts have been replaced with Lexend Deca and Bitter. These fonts have been chosen specifically to improve reading fluency and e-ink performance. These 'sturdier' typefaces feature uniform stroke weights and open geometries, allowing the supported e-ink targets to render crisp, high-contrast text with font-aliasing on while significantly reducing ghosting and artifacts.
+The system has two main layers:
 
-- [Lexend Deca](https://fonts.google.com/specimen/Lexend+Deca) - A research-backed sans-serif typeface designed to improve reading fluency. Lexend was engineered based on the theory that reading issues are often a design problem (visual crowding) rather than a cognitive one.
-- [Bitter](https://fonts.google.com/specimen/Bitter) - A "contemporary" slab serif typeface for text, it is specially designed for comfortably reading on digital screens. The consistent stroke weight of Bitter helps it render particularly well on e-ink devices. The medium weight has been chosen specifically for improved rendering on the supported Kobo and legacy ESP32 e-ink targets.
+1. **Linux and Buildroot** boot the Kobo hardware and manage the display,
+   touchscreen, frontlight, battery, Wi-Fi, storage and sleep/wake behavior.
+2. **The CrossInk reader** provides the home screen, library, EPUB reader,
+   settings, reading statistics and file-transfer interface.
 
-The UI now uses [Inter](https://fonts.google.com/specimen/Inter) as the display font which has improved readability at smaller sizes.
+## What you need
 
-### Emojis and Misc Glyphs
+- a Kobo Glo HD N437;
+- a separate microSD card of at least 2 GB;
+- a computer with a microSD card reader;
+- Raspberry Pi Imager or balenaEtcher;
+- the original Kobo microSD card kept somewhere safe.
 
-- Support for a limited set of Unicode [Emoticons](https://unicode-explorer.com/b/1F600) and [Miscellaneous Symbols](https://unicode-explorer.com/b/2600) using [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) and [Noto Sans Symbols](https://fonts.google.com/noto/specimen/Noto+Sans+Symbols) font.
+Using a separate card is strongly recommended. The original card is your
+easiest recovery route back to the standard Kobo software.
 
----
+## Installing the beta
 
-### Font Sizes
+1. Download the `.img.xz` file and `SHA256SUMS` from the
+   [Beta 3 release](https://github.com/joeblack2k/crossink-kobo/releases/tag/v1.4.0-kobo-beta3).
+2. Check the download:
 
-There are 2 available build variants to choose from due to build size constraints: `tiny`, and `xlarge`.
+   ```sh
+   shasum -a 256 -c SHA256SUMS
+   ```
 
-See [Font Build Variants](./docs/font-build-variants.md) for the full point-size and emoji-support matrix.
+   On Linux, use `sha256sum -c SHA256SUMS`.
 
----
+3. Open the `.img.xz` file directly in Raspberry Pi Imager or balenaEtcher.
+4. Select the separate microSD card, check the target carefully and flash it.
+5. Put the flashed card in the Kobo and power it on.
+6. Leave the Kobo powered while the first boot completes.
 
-### Reader features
+The first boot may restart once. During that restart, CrossInk expands the
+`crossink-user` partition and its filesystem to use all remaining space on the
+card. This works with larger cards too and is not repeated on later boots.
 
-Reader Options, Bionic Reading, Guide Dots, Force Paragraph Indents, reading stats, and finished-book behavior are documented in [Reader Features](./docs/reader-features.md).
+See the full [installation and recovery guide](./docs/installation.md) before
+opening the Kobo or replacing its internal card.
 
-### Custom button actions
+## Adding books
 
-CrossInk adds configurable button shortcuts.
+CrossInk creates `/data/Books` automatically. The easiest way to add books is
+over Wi-Fi:
 
-See [Controls](./docs/controls.md) for the full action list and defaults.
+1. Open **File Transfer** on the Kobo.
+2. Choose **Join Network** or **Create Hotspot**.
+3. Open the address or QR code shown on the Kobo.
+4. Upload EPUB files with the browser file manager.
 
----
+Books can also be downloaded from a configured OPDS library or sent through
+Calibre Wireless. See the [File Transfer guide](./docs/webserver.md) for the
+available methods.
 
-## Tips for the best reading experience
+The book partition uses ext4. Standard Windows and macOS installations cannot
+write to it directly, so use CrossInk's File Transfer screen instead of trying
+to mount the partition on those systems.
 
-CrossInk runs on an ESP32-C3 with limited RAM, so very large folders or complex EPUBs can be slower than they would be on a phone, tablet, or desktop app.
+## What works
 
-- Keep folders under about 200 files. For the smoothest browsing, aim for 50-100 files per folder.
-- Having 1000+ books on the SD card is fine if they are split into smaller folders, such as by author, series, genre, or read/unread status.
-- Avoid putting every book in the SD card root. The file browser has to scan and sort the current folder before it can show it.
-- Text-first EPUBs are the best fit. Large image-heavy EPUBs, scanned books, comics, and omnibus files with thousands of sections may load slowly or fail under memory pressure.
-- As a rough target, EPUBs under 20 MB tend to work the best. Files over 50 MB may still work, but they are more likely to be slow or memory-sensitive, especially if they contain many large images.
-- If an EPUB is unusually slow, try [optimizing](./docs/webserver.md#epub-optimization) it with the built-in web optimizer (via File Transfer) before copying it to the SD card: remove unused high-resolution images, split very large omnibus files, and avoid embedding multiple full font families when possible.
-- Use a reliable SD card and leave some free space. CrossInk stores settings, reading progress, cache files, stats, and generated book data on the card.
+- EPUB reading with touch navigation and reading-position recovery;
+- adjustable fonts, font size, line spacing, margins and publisher styling;
+- bookmarks, text clippings, recent books and reading statistics;
+- multiple reader themes and sleep-screen options;
+- Kobo touchscreen, e-ink refresh, frontlight and battery reporting;
+- suspend, wake and automatic reader recovery after an application crash;
+- Wi-Fi file transfer, WebDAV, Calibre Wireless and OPDS;
+- automatic use of the remaining space on 2 GB, 32 GB and larger cards;
+- a clean recovery path by reinstalling the untouched original Kobo card.
 
-## Development Device Simulator
+CrossInk is deliberately a reader rather than a general-purpose tablet. EPUB is
+the main format. PDF reading, media playback, games and a full web browser are
+outside the project's scope.
 
-The device simulator renders the e-ink display in an SDL2 window so firmware changes can be sanity-checked without flashing hardware.
+## Beta status
 
-See [Simulator](./docs/simulator.md) for setup, platform notes, keyboard controls, and cache tips.
+Beta 3 is the first public Kobo image. It has passed:
 
----
+- a clean, pinned Buildroot/Linux/CrossInk build;
+- image layout, kernel, DTB, waveform and root-filesystem verification;
+- a simulated first boot and storage expansion on a 32 GB card;
+- filesystem checking, filesystem resize and repeated-boot checks;
+- GitHub host tests, dependency checks, formatting, static analysis and a
+  tracked-source secrets scan;
+- an anonymous public download and checksum verification.
 
-## Installation
+This exact downloadable image was not subjected to an additional physical
+flash-and-boot cycle after packaging. It remains prerelease software, so keep
+the original Kobo card and report hardware results through
+[GitHub Issues](https://github.com/joeblack2k/crossink-kobo/issues).
 
-Download the current prerelease image from
-[GitHub Releases](https://github.com/joeblack2k/crossink-kobo/releases) and follow
-the [installation and recovery instructions](./docs/installation.md). Local
-build instructions and hardware prerequisites are documented in
-[Kobo build](./docs/kobo-build.md).
+Known Beta 3 limitation: progressive JPEG cover thumbnails are skipped on Kobo
+to avoid a known ARM decoder crash. Normal baseline JPEG covers continue to
+work.
 
----
+## Storage layout
+
+| Partition | Purpose |
+|---|---|
+| Boot | Kobo kernel, device tree and display waveform |
+| Recovery | Independent maintenance and recovery environment |
+| Root filesystem | Minimal Buildroot Linux system |
+| `crossink-user` | Books, settings, caches and reading data |
+
+Only the final `crossink-user` partition grows. The fixed boot, recovery and
+Linux partitions are left unchanged.
+
+## For developers
+
+The Kobo target lives under `platform/kobo` and `buildroot-external`. Buildroot
+starts `/usr/sbin/crossink-supervisor`, which launches the active reader from
+`/opt/crossink/current/bin/crossink-kobo` and handles bounded crash recovery.
+
+A complete image build needs Linux, the pinned revisions in `sources.lock`, a
+user-owned N437 reference image and an SSH public key kept outside Git:
+
+```sh
+export CROSSINK_SSH_PUBLIC_KEY_FILE="$HOME/.config/crossink-kobo/n437_ed25519.pub"
+export CROSSINK_N437_REFERENCE_IMAGE="$HOME/firmware/kobo-n437-reference.img"
+./scripts/kobo/build-rootfs.sh
+```
+
+Read [Kobo build](./docs/kobo-build.md) for the complete prerequisites and
+release rules. A successful host build is not proof of correct physical
+display, touch, suspend or battery behavior.
 
 ## Documentation
 
-- [User Guide](./USER_GUIDE.md)
-- [Installation](./docs/installation.md)
-- [Font Build Variants](./docs/font-build-variants.md)
-- [Reader Features](./docs/reader-features.md)
-- [Controls](./docs/controls.md)
-- [Simulator](./docs/simulator.md)
-- [Data Cache](./docs/data-cache.md)
-- [Web server usage](./docs/webserver.md)
-- [Web server endpoints](./docs/webserver-endpoints.md)
-- [Common issues](./docs/troubleshooting.md)
+- [Installation and recovery](./docs/installation.md)
+- [File Transfer and Wi-Fi](./docs/webserver.md)
+- [Reader features](./docs/reader-features.md)
+- [Troubleshooting](./docs/troubleshooting.md)
+- [Kobo build instructions](./docs/kobo-build.md)
 - [Project scope](./SCOPE.md)
-- [Contributing docs](./docs/contributing/README.md)
+- [Changelog](./CHANGELOG.md)
 
----
+## Credits and license
 
-## Development quick start
-
-The legacy ESP32 targets use PlatformIO. The Kobo target uses the Buildroot/CMake flow
-described in [Kobo build](./docs/kobo-build.md).
-
-See [Getting Started](./docs/contributing/getting-started.md) for prerequisites, clone setup, hooks, and validation commands.
-
-### Build / flash / monitor
-
-For Kobo development, build the image locally and deploy only after checking the target
-model and recovery path:
-
-```sh
-./scripts/kobo/build-image.sh
-```
-
-Replace `tiny` with another build variant if needed. See [Font Build Variants](./docs/font-build-variants.md).
-
-See [Testing and Debugging](./docs/contributing/testing-debugging.md) for serial logging, simulator checks, static analysis, and bug-report guidance.
-
----
-
-## Internals
-
-The ESP32-C3 has about 380 KB of usable RAM, so CrossInk stores reusable book and device data on the SD card instead of rebuilding everything in memory.
-
-See [Data Cache](./docs/data-cache.md) for the `.crosspoint` layout and [File Formats](./docs/file-formats.md) for binary cache details.
+CrossInk-Kobo builds on the work of the
+[CrossInk](https://github.com/uxjulia/CrossInk) and Crosspoint Reader
+communities. The source is provided under the [MIT License](./LICENSE).
