@@ -13,7 +13,6 @@
 #include <cstring>
 
 #include "BitmapHelpers.h"
-#include "ProgressiveJpegThumbnail.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Toggle these to test different configurations
@@ -613,10 +612,10 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   // button).  Refuse this unsafe decoder path rather than letting a cover
   // thumbnail reboot the reader. Baseline JPEG and all existing cached covers
   // continue normally; progressive support remains an explicit follow-up with
-  // a decoder that is safe on ARM. The thumbnail cache uses the same bounded
-  // stb_image path as the reader; never fall through to the unsafe MCU path.
+  // a decoder that is safe on ARM.
   if (progressive) {
-    return oneBit && progressiveJpegTo1BitThumbnail(jpegFile, bmpOut, targetWidth, targetHeight, adaptiveContain);
+    LOG_ERR("JPG", "Skipping progressive JPEG on Kobo: unsafe JPEGDEC MCU path");
+    return false;
   }
 #endif
 

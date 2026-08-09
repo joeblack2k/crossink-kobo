@@ -146,6 +146,20 @@ file "$root_dump/usr/bin/crossink-kobo" | grep -q 'ELF 32-bit.*ARM' || {
 	echo 'Wi-Fi driver init service absent from p3' >&2
 	exit 1
 }
+for path in /sbin/sfdisk /sbin/e2fsck /sbin/resize2fs /usr/sbin/crossink-grow-data; do
+	[ -x "$root_dump$path" ] || {
+		echo "Data partition growth tool absent from p3: $path" >&2
+		exit 1
+	}
+done
+grep -q 'label-id: 0x4370b001' "$root_dump/usr/sbin/crossink-grow-data" || {
+	echo 'N437 partition-table guard absent from growth helper' >&2
+	exit 1
+}
+grep -q '192.168.7.2:22' "$root_dump/etc/default/dropbear" || {
+	echo 'Dropbear is not restricted to USB Ethernet' >&2
+	exit 1
+}
 grep -q '^root:\*:' "$root_dump/etc/shadow" || { echo 'Root password is not locked' >&2; exit 1; }
 grep -q '^ssh-ed25519 ' "$root_dump/root/.ssh/authorized_keys" || {
 	echo 'Dedicated public SSH key absent' >&2
